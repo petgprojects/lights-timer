@@ -15,6 +15,11 @@ final class ScheduleEngine {
     var isRunning: Bool { activeSchedule != nil }
     var currentProgress: Double = 0
 
+    // MARK: - Sync State
+    private(set) var isSyncing: Bool = false
+    private(set) var syncStepsCompleted: Int = 0
+    private(set) var syncStepsTotal: Int = 0
+
     init(homeKitService: HomeKitService, lightController: LightController) {
         self.homeKitService = homeKitService
         self.lightController = lightController
@@ -216,6 +221,21 @@ final class ScheduleEngine {
             return
         }
 
+        guard !isSyncing else {
+            print("[ScheduleEngine] Sync already in progress, skipping")
+            return
+        }
+
+        isSyncing = true
+        syncStepsCompleted = 0
+        syncStepsTotal = 0
+
+        defer {
+            isSyncing = false
+            syncStepsCompleted = 0
+            syncStepsTotal = 0
+        }
+
         do {
             // Clean up old scenes and triggers we previously created
             await cleanupOldScenesAndTriggers()
@@ -224,6 +244,20 @@ final class ScheduleEngine {
                 predicate: #Predicate { $0.isEnabled }
             )
             let schedules = try modelContext.fetch(descriptor)
+
+            // Pre-calculate total steps for progress tracking
+            let now = Date()
+            var totalSteps = 0
+            for schedule in schedules {
+                guard !schedule.lightIdentifiers.isEmpty,
+                      let wakeUpTime = nextOccurrence(for: schedule) else { continue }
+                let startTime = wakeUpTime.addingTimeInterval(-TimeInterval(schedule.leadTimeMinutes * 60))
+                for step in 1...schedule.leadTimeMinutes {
+                    let fireDate = startTime.addingTimeInterval(Double(step - 1) * 60.0)
+                    if fireDate > now { totalSteps += 1 }
+                }
+            }
+            syncStepsTotal = totalSteps
 
             for schedule in schedules {
                 await createScenesForSchedule(schedule)
@@ -376,8 +410,11 @@ final class ScheduleEngine {
                 try await addTrigger(trigger, to: home)
                 try await addActionSetToTrigger(actionSet, trigger: trigger)
                 try await enableTrigger(trigger)
+
+                syncStepsCompleted += 1
             } catch {
                 print("[ScheduleEngine] Failed to create scene \(sceneName): \(error)")
+                syncStepsCompleted += 1
             }
         }
 

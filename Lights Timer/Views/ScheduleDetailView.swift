@@ -25,6 +25,7 @@ struct ScheduleDetailView: View {
     @State private var lightNames: [String] = []
     @State private var usesSmartWake: Bool = false
     @State private var smartWakeWindowMinutes: Int = 30
+    @State private var isSaving: Bool = false
 
     private var isEditing: Bool { scheduleToEdit != nil }
 
@@ -51,22 +52,32 @@ struct ScheduleDetailView: View {
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
+                    isSaving = true
                     save()
                     Task {
                         await scheduleEngine.onAppActive(modelContext: modelContext)
+                        isSaving = false
+                        dismiss()
                     }
-                    dismiss()
                 }
                 .fontWeight(.semibold)
+                .disabled(isSaving)
             }
             if !isEditing {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
                     }
+                    .disabled(isSaving)
                 }
             }
         }
+        .overlay {
+            if isSaving {
+                syncOverlay
+            }
+        }
+        .interactiveDismissDisabled(isSaving)
         .onAppear {
             if let schedule = scheduleToEdit {
                 populateFromSchedule(schedule)
@@ -200,6 +211,39 @@ struct ScheduleDetailView: View {
             }
         } header: {
             Label("Target Brightness", systemImage: "sun.max")
+        }
+    }
+
+    // MARK: - Sync Overlay
+
+    private var syncOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.orange)
+
+                Text("Syncing to HomeKit…")
+                    .font(.headline)
+
+                if scheduleEngine.syncStepsTotal > 0 {
+                    ProgressView(
+                        value: Double(scheduleEngine.syncStepsCompleted),
+                        total: Double(scheduleEngine.syncStepsTotal)
+                    )
+                    .tint(.orange)
+                    .frame(width: 200)
+
+                    Text("\(scheduleEngine.syncStepsCompleted) / \(scheduleEngine.syncStepsTotal) scenes")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(32)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         }
     }
 

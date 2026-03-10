@@ -52,6 +52,33 @@ struct ScheduleListView: View {
 
     private var scheduleList: some View {
         List {
+            if scheduleEngine.isSyncing {
+                Section {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .tint(.orange)
+                        VStack(alignment: .leading) {
+                            Text("Syncing to HomeKit…")
+                                .font(.subheadline.bold())
+                            if scheduleEngine.syncStepsTotal > 0 {
+                                Text("\(scheduleEngine.syncStepsCompleted) / \(scheduleEngine.syncStepsTotal) scenes")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if scheduleEngine.syncStepsTotal > 0 {
+                            ProgressView(
+                                value: Double(scheduleEngine.syncStepsCompleted),
+                                total: Double(scheduleEngine.syncStepsTotal)
+                            )
+                            .frame(width: 60)
+                            .tint(.orange)
+                        }
+                    }
+                }
+            }
+
             if scheduleEngine.isRunning, let active = scheduleEngine.activeSchedule {
                 Section {
                     HStack {
