@@ -21,6 +21,11 @@ final class LightSchedule {
     var lightNames: [String]
     var createdAt: Date
 
+    // Smart Wake
+    var usesSmartWake: Bool = false
+    var smartWakeWindowMinutes: Int = 30
+    var lastSmartWakeTriggerAt: Date?
+
     var activeDays: Set<DayOfWeek> {
         get {
             Set(activeDaysRaw.compactMap { DayOfWeek(rawValue: $0) })
@@ -61,7 +66,9 @@ final class LightSchedule {
         endColorSaturation: Double = 0.0,
         endColorBrightness: Double = 1.0,
         lightIdentifiers: [String] = [],
-        lightNames: [String] = []
+        lightNames: [String] = [],
+        usesSmartWake: Bool = false,
+        smartWakeWindowMinutes: Int = 30
     ) {
         self.id = UUID()
         self.name = name
@@ -80,5 +87,8 @@ final class LightSchedule {
         self.lightIdentifiers = lightIdentifiers
         self.lightNames = lightNames
         self.createdAt = Date()
+        self.usesSmartWake = usesSmartWake
+        self.smartWakeWindowMinutes = smartWakeWindowMinutes
+        self.lastSmartWakeTriggerAt = nil
     }
 }

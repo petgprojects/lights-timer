@@ -4,6 +4,8 @@ import SwiftData
 struct ScheduleListView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(ScheduleEngine.self) private var scheduleEngine
+    @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
+    @Environment(WatchConnectivityService.self) private var watchConnectivity
     @Query(sort: \LightSchedule.createdAt) private var schedules: [LightSchedule]
     @State private var showingNewSchedule = false
 
@@ -76,8 +78,43 @@ struct ScheduleListView: View {
                 } label: {
                     scheduleRow(schedule)
                 }
+                .swipeActions(edge: .leading) {
+                    if schedule.usesSmartWake {
+                        Button {
+                            Task {
+                                await smartWakeCoordinator.simulateTrigger(for: schedule)
+                                await smartWakeCoordinator.processPendingTrigger(modelContext: modelContext)
+                            }
+                        } label: {
+                            Label("Test Wake", systemImage: "bolt.fill")
+                        }
+                        .tint(.blue)
+                    }
+                }
             }
             .onDelete(perform: deleteSchedules)
+
+            #if DEBUG
+            if let result = smartWakeCoordinator.lastTriggerResult {
+                Section("Smart Wake Debug") {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Text("Watch")
+                            .font(.caption)
+                        Spacer()
+                        Image(systemName: watchConnectivity.isWatchReachable ? "checkmark.circle.fill" : "xmark.circle")
+                            .foregroundStyle(watchConnectivity.isWatchReachable ? .green : .red)
+                            .imageScale(.small)
+                        Text(watchConnectivity.isWatchAppInstalled ? "Installed" : "Not installed")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            #endif
         }
     }
 
@@ -111,6 +148,15 @@ struct ScheduleListView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    if schedule.usesSmartWake {
+                        Text("--")
+                            .font(.caption)
+                            .foregroundStyle(.quaternary)
+                        Label("Smart Wake", systemImage: "applewatch")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
                 }
             }
 
@@ -141,18 +187,23 @@ struct ScheduleListView: View {
         Task {
             await scheduleEngine.onAppActive(modelContext: modelContext)
         }
+        smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
     }
 }
 
 #Preview {
     let service = HomeKitService()
+    let connectivity = WatchConnectivityService()
+    let engine = ScheduleEngine(
+        homeKitService: service,
+        lightController: LightController(homeKitService: service)
+    )
     NavigationStack {
         ScheduleListView()
     }
     .modelContainer(for: LightSchedule.self, inMemory: true)
     .environment(service)
-    .environment(ScheduleEngine(
-        homeKitService: service,
-        lightController: LightController(homeKitService: service)
-    ))
+    .environment(engine)
+    .environment(SmartWakeCoordinator(scheduleEngine: engine, watchConnectivity: connectivity))
+    .environment(connectivity)
 }

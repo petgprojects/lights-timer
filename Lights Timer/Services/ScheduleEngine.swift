@@ -161,6 +161,50 @@ final class ScheduleEngine {
         }
     }
 
+    // MARK: - Smart Wake Execution
+
+    /// Starts a smart-wake-triggered ramp from triggerTime to the schedule's wake time.
+    /// The ramp compresses proportionally into the remaining time.
+    func startSmartWakeExecution(for schedule: LightSchedule, triggerTime: Date) async {
+        guard let wakeUpTime = nextOccurrence(for: schedule) else {
+            print("[ScheduleEngine] No next occurrence for smart wake")
+            return
+        }
+
+        guard triggerTime < wakeUpTime else {
+            print("[ScheduleEngine] Smart wake trigger is past wake time, ignoring")
+            return
+        }
+
+        guard !isRunning else {
+            print("[ScheduleEngine] Already running, ignoring smart wake trigger")
+            return
+        }
+
+        // Clean up background scenes for this schedule to prevent conflicts
+        await cleanupScenesForSchedule(schedule.id)
+
+        print("[ScheduleEngine] Starting smart wake for '\(schedule.name)' from \(triggerTime) to \(wakeUpTime)")
+        startForegroundExecution(for: schedule, startTime: triggerTime, endTime: wakeUpTime)
+    }
+
+    /// Removes background scenes and triggers for a specific schedule.
+    private func cleanupScenesForSchedule(_ scheduleID: UUID) async {
+        let shortID = String(scheduleID.uuidString.prefix(8))
+        let prefix = "LT_\(shortID)_"
+
+        for home in homeKitService.homes {
+            let triggers = home.triggers.filter { $0.name.hasPrefix(prefix) }
+            for trigger in triggers {
+                try? await removeTrigger(trigger, from: home)
+            }
+            let scenes = home.actionSets.filter { $0.name.hasPrefix(prefix) }
+            for scene in scenes {
+                try? await removeActionSet(scene, from: home)
+            }
+        }
+    }
+
     // MARK: - Background Scenes (HMActionSet + HMTimerTrigger)
 
     /// Creates HomeKit scenes and timer triggers for background execution.

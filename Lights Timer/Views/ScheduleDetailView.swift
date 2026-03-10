@@ -23,6 +23,8 @@ struct ScheduleDetailView: View {
     @State private var endBrightness: Double = 1.0
     @State private var lightIdentifiers: [String] = []
     @State private var lightNames: [String] = []
+    @State private var usesSmartWake: Bool = false
+    @State private var smartWakeWindowMinutes: Int = 30
 
     private var isEditing: Bool { scheduleToEdit != nil }
 
@@ -33,6 +35,7 @@ struct ScheduleDetailView: View {
             daysSection
             lightsSection
             leadTimeSection
+            smartWakeSection
             brightnessSection
             ColorPreferenceView(
                 startHue: $startHue,
@@ -143,6 +146,32 @@ struct ScheduleDetailView: View {
         }
     }
 
+    private var smartWakeSection: some View {
+        Section {
+            Toggle(isOn: $usesSmartWake) {
+                Label("Smart Wake", systemImage: "applewatch")
+            }
+            .tint(.orange)
+
+            if usesSmartWake {
+                Stepper(
+                    "\(smartWakeWindowMinutes) min window",
+                    value: $smartWakeWindowMinutes,
+                    in: 10...60,
+                    step: 5
+                )
+            }
+        } header: {
+            Label("Apple Watch", systemImage: "applewatch")
+        } footer: {
+            if usesSmartWake {
+                Text("Lights will start at the best moment in the last \(smartWakeWindowMinutes) minutes before wake time, based on Apple Watch sensor data. Falls back to scheduled time if the watch is unavailable.")
+            } else {
+                Text("Enable to use Apple Watch sensors to find the ideal wake moment.")
+            }
+        }
+    }
+
     private var brightnessSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
@@ -191,6 +220,8 @@ struct ScheduleDetailView: View {
         endBrightness = schedule.endColorBrightness
         lightIdentifiers = schedule.lightIdentifiers
         lightNames = schedule.lightNames
+        usesSmartWake = schedule.usesSmartWake
+        smartWakeWindowMinutes = schedule.smartWakeWindowMinutes
     }
 
     private func save() {
@@ -213,6 +244,8 @@ struct ScheduleDetailView: View {
             schedule.endColorBrightness = endBrightness
             schedule.lightIdentifiers = lightIdentifiers
             schedule.lightNames = lightNames
+            schedule.usesSmartWake = usesSmartWake
+            schedule.smartWakeWindowMinutes = smartWakeWindowMinutes
         } else {
             let schedule = LightSchedule(
                 name: name,
@@ -228,7 +261,9 @@ struct ScheduleDetailView: View {
                 endColorSaturation: endSaturation,
                 endColorBrightness: endBrightness,
                 lightIdentifiers: lightIdentifiers,
-                lightNames: lightNames
+                lightNames: lightNames,
+                usesSmartWake: usesSmartWake,
+                smartWakeWindowMinutes: smartWakeWindowMinutes
             )
             modelContext.insert(schedule)
         }

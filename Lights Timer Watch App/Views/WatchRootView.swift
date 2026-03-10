@@ -1,0 +1,151 @@
+import SwiftUI
+
+struct WatchRootView: View {
+    @Environment(WatchSessionManager.self) private var sessionManager
+    @Environment(SmartWakeSessionController.self) private var sessionController
+
+    var body: some View {
+        NavigationStack {
+            List {
+                statusSection
+                schedulesSection
+                diagnosticsSection
+            }
+            .navigationTitle("Lights Timer")
+        }
+    }
+
+    // MARK: - Sections
+
+    private var statusSection: some View {
+        Section("Status") {
+            HStack {
+                Image(systemName: statusIcon)
+                    .foregroundStyle(statusColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(statusTitle)
+                        .font(.headline)
+                    Text(statusSubtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !sessionController.isHealthKitAuthorized {
+                Button("Grant Health Access") {
+                    Task {
+                        await sessionController.requestAuthorization()
+                    }
+                }
+                .tint(.orange)
+            }
+        }
+    }
+
+    private var schedulesSection: some View {
+        Section("Smart Wake Schedules") {
+            if sessionManager.activeSchedules.isEmpty {
+                Text("No smart wake schedules")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            } else {
+                ForEach(sessionManager.activeSchedules) { schedule in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(schedule.name)
+                                .font(.headline)
+                            Text(schedule.wakeUpTimeString)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if sessionController.currentScheduleID == schedule.id {
+                            Image(systemName: "waveform.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        Section("Diagnostics") {
+            if sessionController.sessionState == .monitoring {
+                Text(sessionController.heuristicEngine.diagnosticSummary)
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            HStack {
+                Text("Phone")
+                    .font(.caption)
+                Spacer()
+                Image(systemName: sessionManager.isPhoneReachable ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundStyle(sessionManager.isPhoneReachable ? .green : .red)
+            }
+
+            if let error = sessionController.errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+
+            if sessionController.sessionState == .monitoring {
+                Button("Stop Monitoring", role: .destructive) {
+                    sessionController.stopMonitoring()
+                }
+            }
+        }
+    }
+
+    // MARK: - Status Helpers
+
+    private var statusIcon: String {
+        switch sessionController.sessionState {
+        case .idle: "moon.zzz"
+        case .monitoring: "waveform.circle.fill"
+        case .triggered: "sunrise.fill"
+        case .failed: "exclamationmark.triangle"
+        }
+    }
+
+    private var statusColor: Color {
+        switch sessionController.sessionState {
+        case .idle: .secondary
+        case .monitoring: .green
+        case .triggered: .orange
+        case .failed: .red
+        }
+    }
+
+    private var statusTitle: String {
+        switch sessionController.sessionState {
+        case .idle: "Idle"
+        case .monitoring: "Monitoring"
+        case .triggered: "Triggered"
+        case .failed: "Error"
+        }
+    }
+
+    private var statusSubtitle: String {
+        switch sessionController.sessionState {
+        case .idle:
+            if let next = nextScheduleDescription {
+                return "Next: \(next)"
+            }
+            return "No upcoming smart wake"
+        case .monitoring:
+            return "Watching for wake signals..."
+        case .triggered:
+            return "Light ramp started!"
+        case .failed:
+            return sessionController.errorMessage ?? "Unknown error"
+        }
+    }
+
+    private var nextScheduleDescription: String? {
+        guard let schedule = sessionManager.activeSchedules.first else { return nil }
+        return "\(schedule.name) at \(schedule.wakeUpTimeString)"
+    }
+}
