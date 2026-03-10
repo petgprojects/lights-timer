@@ -1,0 +1,453 @@
+import Foundation
+import HomeKit
+import SwiftData
+import Combine
+
+@Observable
+final class ScheduleEngine {
+    let homeKitService: HomeKitService
+    private let lightController: LightController
+    private var timerCancellable: AnyCancellable?
+    private(set) var activeSchedule: LightSchedule?
+    private var transitionStartTime: Date?
+    private var transitionEndTime: Date?
+
+    var isRunning: Bool { activeSchedule != nil }
+    var currentProgress: Double = 0
+
+    init(homeKitService: HomeKitService, lightController: LightController) {
+        self.homeKitService = homeKitService
+        self.lightController = lightController
+    }
+
+    // MARK: - Lifecycle Entry Point
+
+    /// Called when the app comes to foreground or when a schedule is saved.
+    /// This is the main entry point that orchestrates everything.
+    func onAppActive(modelContext: ModelContext) async {
+        // 1. Check if any schedule is currently in its execution window
+        //    and start foreground execution if so
+        await checkForActiveSchedules(modelContext: modelContext)
+
+        // 2. Set up background triggers (scenes) for future schedules
+        await syncBackgroundScenes(modelContext: modelContext)
+    }
+
+    // MARK: - Foreground Execution (Direct Writes)
+
+    /// Checks all enabled schedules to see if any are currently in their
+    /// execution window (between startTime and wakeUpTime). If so, starts
+    /// the foreground timer for smooth transitions.
+    func checkForActiveSchedules(modelContext: ModelContext) async {
+        // Don't interrupt an already-running execution
+        if isRunning { return }
+
+        do {
+            let descriptor = FetchDescriptor<LightSchedule>(
+                predicate: #Predicate { $0.isEnabled }
+            )
+            let schedules = try modelContext.fetch(descriptor)
+            let now = Date()
+
+            for schedule in schedules {
+                guard !schedule.lightIdentifiers.isEmpty else { continue }
+                guard let wakeUpTime = nextOccurrence(for: schedule) else { continue }
+
+                let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
+                let startTime = wakeUpTime.addingTimeInterval(-leadSeconds)
+
+                // Check if we're currently inside the execution window
+                if now >= startTime && now < wakeUpTime {
+                    startForegroundExecution(
+                        for: schedule,
+                        startTime: startTime,
+                        endTime: wakeUpTime
+                    )
+                    return
+                }
+            }
+        } catch {
+            print("[ScheduleEngine] Failed to check schedules: \(error)")
+        }
+    }
+
+    /// Starts the foreground timer for smooth light transitions.
+    /// Called with pre-calculated start/end times.
+    func startForegroundExecution(for schedule: LightSchedule, startTime: Date, endTime: Date) {
+        activeSchedule = schedule
+        transitionStartTime = startTime
+        transitionEndTime = endTime
+
+        print("[ScheduleEngine] Starting foreground execution for '\(schedule.name)' until \(endTime)")
+
+        timerCancellable = Timer.publish(every: 15, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    await self.tickForegroundExecution()
+                }
+            }
+
+        // Execute immediately as well
+        Task {
+            await tickForegroundExecution()
+        }
+    }
+
+    func stopForegroundExecution() {
+        timerCancellable?.cancel()
+        timerCancellable = nil
+        activeSchedule = nil
+        transitionStartTime = nil
+        transitionEndTime = nil
+        currentProgress = 0
+        print("[ScheduleEngine] Stopped foreground execution")
+    }
+
+    private func tickForegroundExecution() async {
+        guard let schedule = activeSchedule,
+              let startTime = transitionStartTime,
+              let endTime = transitionEndTime else { return }
+
+        let now = Date()
+        let progress = calculateProgress(startTime: startTime, endTime: endTime, now: now)
+        currentProgress = progress
+
+        if progress >= 1.0 {
+            // Final step: set to target values
+            let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
+            try? await lightController.applyToMultipleLights(
+                brightness: schedule.targetBrightness,
+                hue: schedule.endColorHue * 360.0,
+                saturation: schedule.endColorSaturation * 100.0,
+                powerOn: true,
+                identifiers: identifiers
+            )
+            stopForegroundExecution()
+            return
+        }
+
+        guard progress > 0 else { return }
+
+        let hsb = interpolateHSB(
+            startHue: schedule.startColorHue,
+            startSat: schedule.startColorSaturation,
+            startBri: schedule.startColorBrightness,
+            endHue: schedule.endColorHue,
+            endSat: schedule.endColorSaturation,
+            endBri: schedule.endColorBrightness,
+            progress: progress
+        )
+        let brightness = interpolateBrightness(
+            target: schedule.targetBrightness,
+            progress: progress
+        )
+
+        let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
+
+        print("[ScheduleEngine] Tick: progress=\(String(format: "%.1f%%", progress * 100)), brightness=\(brightness)")
+
+        do {
+            try await lightController.applyToMultipleLights(
+                brightness: brightness,
+                hue: hsb.hue * 360.0,
+                saturation: hsb.saturation * 100.0,
+                powerOn: true,
+                identifiers: identifiers
+            )
+        } catch {
+            print("[ScheduleEngine] Failed to apply light state: \(error)")
+        }
+    }
+
+    // MARK: - Background Scenes (HMActionSet + HMTimerTrigger)
+
+    /// Creates HomeKit scenes and timer triggers for background execution.
+    /// Each scene sets all target lights to a specific brightness/color step.
+    /// Scenes are spaced 1 minute apart (the minimum reliable interval per the user).
+    func syncBackgroundScenes(modelContext: ModelContext) async {
+        guard !homeKitService.homes.isEmpty else {
+            print("[ScheduleEngine] No HomeKit homes available, skipping scene sync")
+            return
+        }
+
+        do {
+            // Clean up old scenes and triggers we previously created
+            await cleanupOldScenesAndTriggers()
+
+            let descriptor = FetchDescriptor<LightSchedule>(
+                predicate: #Predicate { $0.isEnabled }
+            )
+            let schedules = try modelContext.fetch(descriptor)
+
+            for schedule in schedules {
+                await createScenesForSchedule(schedule)
+            }
+        } catch {
+            print("[ScheduleEngine] Failed to sync scenes: \(error)")
+        }
+    }
+
+    private func cleanupOldScenesAndTriggers() async {
+        for home in homeKitService.homes {
+            // Remove old triggers
+            let oldTriggers = home.triggers.filter { $0.name.hasPrefix("LT_") }
+            for trigger in oldTriggers {
+                do {
+                    try await removeTrigger(trigger, from: home)
+                } catch {
+                    print("[ScheduleEngine] Failed to remove trigger: \(error)")
+                }
+            }
+
+            // Remove old action sets (scenes)
+            let oldScenes = home.actionSets.filter { $0.name.hasPrefix("LT_") }
+            for scene in oldScenes {
+                do {
+                    try await removeActionSet(scene, from: home)
+                } catch {
+                    print("[ScheduleEngine] Failed to remove scene: \(error)")
+                }
+            }
+        }
+    }
+
+    private func createScenesForSchedule(_ schedule: LightSchedule) async {
+        guard let wakeUpTime = nextOccurrence(for: schedule) else {
+            print("[ScheduleEngine] No next occurrence for '\(schedule.name)'")
+            return
+        }
+
+        let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
+        guard !identifiers.isEmpty else { return }
+
+        // Find the home containing these lights
+        guard let home = homeKitService.homes.first(where: { home in
+            home.accessories.contains { accessory in
+                identifiers.contains(accessory.uniqueIdentifier)
+            }
+        }) else {
+            print("[ScheduleEngine] No home found with target lights")
+            return
+        }
+
+        let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
+        let startTime = wakeUpTime.addingTimeInterval(-leadSeconds)
+
+        // Space steps 1 minute apart (minimum reliable interval)
+        let stepCount = schedule.leadTimeMinutes
+        let now = Date()
+
+        let shortID = String(schedule.id.uuidString.prefix(8))
+        print("[ScheduleEngine] Creating \(stepCount) scenes for '\(schedule.name)' starting at \(startTime)")
+
+        for step in 1...stepCount {
+            let progress = Double(step) / Double(stepCount)
+            let fireDate = startTime.addingTimeInterval(Double(step - 1) * 60.0)
+
+            // Skip steps that are already in the past
+            guard fireDate > now else { continue }
+
+            let brightness = interpolateBrightness(
+                target: schedule.targetBrightness,
+                progress: progress
+            )
+            let hsb = interpolateHSB(
+                startHue: schedule.startColorHue,
+                startSat: schedule.startColorSaturation,
+                startBri: schedule.startColorBrightness,
+                endHue: schedule.endColorHue,
+                endSat: schedule.endColorSaturation,
+                endBri: schedule.endColorBrightness,
+                progress: progress
+            )
+
+            let sceneName = "LT_\(shortID)_\(step)"
+
+            do {
+                // 1. Create the scene (action set) on the home
+                let actionSet = try await addActionSet(withName: sceneName, to: home)
+
+                // 2. Add actions for each light
+                for accessoryID in identifiers {
+                    guard let accessory = home.accessories.first(where: {
+                        $0.uniqueIdentifier == accessoryID
+                    }) else { continue }
+
+                    guard let service = accessory.services.first(where: {
+                        $0.serviceType == HMServiceTypeLightbulb
+                    }) else { continue }
+
+                    // Power on
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypePowerState
+                    }) {
+                        let action = HMCharacteristicWriteAction(
+                            characteristic: char, targetValue: true as NSNumber
+                        )
+                        try await addAction(action, to: actionSet)
+                    }
+
+                    // Brightness
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypeBrightness
+                    }) {
+                        let action = HMCharacteristicWriteAction(
+                            characteristic: char, targetValue: brightness as NSNumber
+                        )
+                        try await addAction(action, to: actionSet)
+                    }
+
+                    // Hue (color lights only)
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypeHue
+                    }) {
+                        let action = HMCharacteristicWriteAction(
+                            characteristic: char, targetValue: (hsb.hue * 360.0) as NSNumber
+                        )
+                        try await addAction(action, to: actionSet)
+                    }
+
+                    // Saturation (color lights only)
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypeSaturation
+                    }) {
+                        let action = HMCharacteristicWriteAction(
+                            characteristic: char, targetValue: (hsb.saturation * 100.0) as NSNumber
+                        )
+                        try await addAction(action, to: actionSet)
+                    }
+                }
+
+                // 3. Create a timer trigger for this scene
+                let trigger = HMTimerTrigger(
+                    name: sceneName,
+                    fireDate: fireDate,
+                    timeZone: .current,
+                    recurrence: nil,
+                    recurrenceCalendar: nil
+                )
+
+                try await addTrigger(trigger, to: home)
+                try await addActionSetToTrigger(actionSet, trigger: trigger)
+                try await enableTrigger(trigger)
+            } catch {
+                print("[ScheduleEngine] Failed to create scene \(sceneName): \(error)")
+            }
+        }
+
+        print("[ScheduleEngine] Finished creating scenes for '\(schedule.name)'")
+    }
+
+    // MARK: - Helpers
+
+    func nextOccurrence(for schedule: LightSchedule) -> Date? {
+        let calendar = Calendar.current
+        let now = Date()
+        let activeDays = schedule.activeDays
+
+        guard !activeDays.isEmpty else { return nil }
+
+        for dayOffset in 0..<8 {
+            guard let candidateDate = calendar.date(byAdding: .day, value: dayOffset, to: now) else {
+                continue
+            }
+
+            let weekday = calendar.component(.weekday, from: candidateDate)
+            guard let dayOfWeek = DayOfWeek(rawValue: weekday),
+                  activeDays.contains(dayOfWeek) else { continue }
+
+            var components = calendar.dateComponents([.year, .month, .day], from: candidateDate)
+            components.hour = schedule.wakeUpHour
+            components.minute = schedule.wakeUpMinute
+            components.second = 0
+
+            guard let wakeUpTime = calendar.date(from: components) else { continue }
+
+            // For today, only count if the wake-up time hasn't passed yet
+            if wakeUpTime > now {
+                return wakeUpTime
+            }
+        }
+
+        return nil
+    }
+
+    func calculateProgress(startTime: Date, endTime: Date, now: Date) -> Double {
+        let total = endTime.timeIntervalSince(startTime)
+        guard total > 0 else { return 1.0 }
+        let elapsed = now.timeIntervalSince(startTime)
+        return min(max(elapsed / total, 0), 1.0)
+    }
+
+    // MARK: - Async HomeKit Wrappers
+
+    private func removeTrigger(_ trigger: HMTrigger, from home: HMHome) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeTrigger(trigger) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func removeActionSet(_ actionSet: HMActionSet, from home: HMHome) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeActionSet(actionSet) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func addTrigger(_ trigger: HMTimerTrigger, to home: HMHome) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.addTrigger(trigger) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func addActionSet(withName name: String, to home: HMHome) async throws -> HMActionSet {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMActionSet, Error>) in
+            home.addActionSet(withName: name) { actionSet, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let actionSet {
+                    continuation.resume(returning: actionSet)
+                } else {
+                    continuation.resume(throwing: HomeKitServiceError.serviceNotFound)
+                }
+            }
+        }
+    }
+
+    private func addAction(_ action: HMAction, to actionSet: HMActionSet) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            actionSet.addAction(action) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func addActionSetToTrigger(_ actionSet: HMActionSet, trigger: HMTrigger) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            trigger.addActionSet(actionSet) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func enableTrigger(_ trigger: HMTrigger) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            trigger.enable(true) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+}
