@@ -6,6 +6,9 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var activeSchedules: [WatchScheduleSnapshot] = []
     var isPhoneReachable: Bool = false
 
+    /// Called whenever schedules are received (including from background WCSession delivery).
+    var onSchedulesUpdated: (([WatchScheduleSnapshot]) -> Void)?
+
     private var session: WCSession?
 
     override init() {
@@ -129,6 +132,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         do {
             let schedules = try JSONDecoder().decode([WatchScheduleSnapshot].self, from: data)
             activeSchedules = schedules
+            onSchedulesUpdated?(schedules)
             print("[WatchSession] Received \(schedules.count) schedule(s) from phone")
         } catch {
             print("[WatchSession] Failed to decode schedules: \(error)")

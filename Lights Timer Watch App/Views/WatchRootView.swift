@@ -85,6 +85,14 @@ struct WatchRootView: View {
                     .foregroundStyle(sessionManager.isPhoneReachable ? .green : .red)
             }
 
+            HStack {
+                Text("Background Session")
+                    .font(.caption)
+                Spacer()
+                Image(systemName: sessionController.isAlarmSessionActive ? "checkmark.circle.fill" : "moon.zzz")
+                    .foregroundStyle(sessionController.isAlarmSessionActive ? .green : .secondary)
+            }
+
             if let error = sessionController.errorMessage {
                 Text(error)
                     .font(.caption2)

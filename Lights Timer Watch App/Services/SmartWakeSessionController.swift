@@ -11,6 +11,9 @@ final class SmartWakeSessionController: NSObject {
     private(set) var errorMessage: String?
     private(set) var isHealthKitAuthorized: Bool = false
 
+    /// Set by SmartAlarmScheduler to indicate the extended runtime session is active.
+    var isAlarmSessionActive: Bool = false
+
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?

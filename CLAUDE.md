@@ -77,6 +77,7 @@ Views/
 Services/
   WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules, sends triggers
   SmartWakeSessionController.swift @Observable NSObject, HKWorkoutSession + HKAnchoredObjectQuery, wake check timer
+  SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, schedules background wake for HR monitoring
   WakeHeuristicEngine.swift        @Observable, rolling HR baseline, confidence scoring, trigger decision
 
 Lights_Timer_Watch.entitlements    HealthKit only (com.apple.developer.healthkit)
@@ -147,16 +148,17 @@ HealthKitAuthorizationService    (all injected as @Environment)
 
 ### Smart Wake (usesSmartWake == true)
 1. iPhone sends `WatchScheduleSnapshot` array to watch via `WCSession.updateApplicationContext`.
-2. Watch evaluates next relevant schedule, starts `HKWorkoutSession` + `HKAnchoredObjectQuery` up to 1 hour before wake window.
-3. `WakeHeuristicEngine` builds rolling HR baseline (samples >5min old), scores confidence:
+2. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated` callback, works in background), evaluates next relevant schedule, and starts a `WKExtendedRuntimeSession` (alarm type) to keep the app alive overnight.
+3. When the monitoring window approaches, scheduler starts `HKWorkoutSession` + `HKAnchoredObjectQuery` via `SmartWakeSessionController`.
+4. `WakeHeuristicEngine` builds rolling HR baseline (samples >5min old), scores confidence:
    - HR rise above baseline: 70% weight (normalized by 5 BPM threshold)
    - Short-term HRV (stddev of last 6 samples): 30% weight (normalized by 5 BPM)
    - Trigger threshold: confidence >= 0.6
    - Cooldown: 5 minutes between attempts
-4. When `shouldTrigger(inWakeWindow: true)` passes, watch sends `SmartWakeTriggerPayload` via `WCSession.sendMessage` (fallback: `transferUserInfo`).
-5. iPhone `SmartWakeCoordinator` validates: schedule exists, enabled, usesSmartWake, within window, not already fired today, engine not already running.
-6. `ScheduleEngine.startSmartWakeExecution(for:triggerTime:)` cleans up background scenes for that schedule, then starts foreground ramp from `triggerTime` to `wakeUpTime` (compressed proportionally).
-7. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. Normal scheduled background scenes also serve as fallback.
+5. When `shouldTrigger(inWakeWindow: true)` passes, watch sends `SmartWakeTriggerPayload` via `WCSession.sendMessage` (fallback: `transferUserInfo`).
+6. iPhone `SmartWakeCoordinator` validates: schedule exists, enabled, usesSmartWake, within window, not already fired today, engine not already running.
+7. `ScheduleEngine.startSmartWakeExecution(for:triggerTime:)` cleans up background scenes for that schedule, then starts foreground ramp from `triggerTime` to `wakeUpTime` (compressed proportionally).
+8. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. Normal scheduled background scenes also serve as fallback.
 
 ### Duplicate Prevention
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
@@ -167,6 +169,7 @@ HealthKitAuthorizationService    (all injected as @Environment)
 - Watch unavailable → normal scheduled wake runs via background scenes.
 - HealthKit permissions denied → normal scheduled wake.
 - Watch session dies → normal scheduled wake.
+- Extended runtime session expires/invalidates → `extendedRuntimeSessionWillExpire` force-starts monitoring if pending.
 - Smart wake trigger after scheduled wake time → ignored.
 - Smart wake trigger before window → ignored.
 
@@ -218,6 +221,8 @@ Files placed in `Lights Timer/` automatically belong to the iOS target. Files in
 - **WCSession delegate callbacks**: `nonisolated` + `Task { @MainActor in }` — WCSession fires on a background serial queue, so `assumeIsolated` would crash.
 - **HealthKit delegate callbacks** (`HKWorkoutSessionDelegate`, `HKLiveWorkoutBuilderDelegate`, `HKAnchoredObjectQuery`): `nonisolated` + `Task { @MainActor in }`.
 - **WatchSessionManager**: includes `#if os(iOS)` guard for `sessionDidBecomeInactive`/`sessionDidDeactivate` (required on iOS, absent on watchOS) to handle cross-compilation when iOS target embeds watch app.
+- **SmartAlarmScheduler**: entire file wrapped in `#if os(watchOS)` because `WatchKit` is watchOS-only. References in `LightsTimerWatchApp.swift` also guarded with `#if os(watchOS)`.
+- **WKExtendedRuntimeSessionDelegate callbacks**: `nonisolated` + `Task { @MainActor in }` (same pattern as WCSession/HealthKit delegates).
 
 ### HomeKit Constraints
 - `HMActionSet` scenes spaced 1 minute apart minimum (closer intervals "get weird").
@@ -227,9 +232,10 @@ Files placed in `Lights Timer/` automatically belong to the iOS target. Files in
 - `HMActionSet()` has no public init — use `home.addActionSet(withName:)`.
 - Async HomeKit wrappers use `withCheckedThrowingContinuation` over callback APIs.
 
-### Entitlements
+### Entitlements And Background Modes
 - iOS: `com.apple.developer.homekit` only
 - watchOS: `com.apple.developer.healthkit` only (NOT `healthkit.access` — that requires Apple approval for Health Records)
+- watchOS background modes (`INFOPLIST_KEY_WKBackgroundModes`): `workout-processing` + `smart-alarm` — enables both `HKWorkoutSession` and `WKExtendedRuntimeSession` (alarm type) to run concurrently in the background
 - Info.plist health strings set via build settings: `INFOPLIST_KEY_NSHealthShareUsageDescription`, `INFOPLIST_KEY_NSHealthUpdateUsageDescription`
 
 ## Testing
@@ -290,5 +296,6 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 - Smart wake heuristic is basic (HR rise + variability) — not true sleep-stage classification.
 - Foreground ramp (`Timer.publish`) only ticks while app is in foreground. Background relies on HomeKit timer-triggered scenes.
 - Smart wake trigger delivery requires iPhone app to be reachable via WCSession. If phone is unreachable, trigger is queued via `transferUserInfo` but may arrive late — background scenes serve as fallback.
-- Watch workout session consumes battery — monitoring starts up to 1 hour before wake window.
+- Watch `WKExtendedRuntimeSession` (alarm type) + `HKWorkoutSession` consume battery — extended session starts up to 2 hours before wake, HR monitoring starts up to 1 hour before wake window.
+- The extended runtime session must be started while the watch app is awake (e.g. when schedules sync from iPhone, or user opens watch app). If the app is never activated after schedules change, the session won't be scheduled. The `WatchSessionManager.onSchedulesUpdated` callback handles background WCSession delivery to mitigate this.
 - SwiftData model changes (adding/removing fields) may require migration handling for existing user data.
