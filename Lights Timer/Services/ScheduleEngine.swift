@@ -196,9 +196,6 @@ final class ScheduleEngine {
             return
         }
 
-        // Clean up background scenes for this schedule to prevent conflicts
-        await cleanupScenesForSchedule(schedule.id)
-
         activeSchedule = schedule
 
         // Request background execution time
@@ -210,12 +207,15 @@ final class ScheduleEngine {
         // Determine ramp duration based on available background time
         let availableTime = UIApplication.shared.backgroundTimeRemaining
         let rampDuration: TimeInterval
+        let shouldRemoveFallbackScene: Bool
         if availableTime > 120 {
             // App is in foreground (backgroundTimeRemaining returns very large value)
             rampDuration = 60
+            shouldRemoveFallbackScene = true
         } else {
             // In background: use available time with safety buffer
             rampDuration = max(min(availableTime - 8, 60), 3)
+            shouldRemoveFallbackScene = false
         }
 
         let startTime = Date()
@@ -285,6 +285,10 @@ final class ScheduleEngine {
             skipColor: schedule.skipColorWrites,
             identifiers: identifiers
         )
+
+        if shouldRemoveFallbackScene {
+            await cleanupScenesForSchedule(schedule.id)
+        }
 
         stopForegroundExecution()
 

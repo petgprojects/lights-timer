@@ -10,6 +10,14 @@ struct WatchScheduleSnapshot: Codable, Identifiable, Equatable {
     let usesSmartWake: Bool
     let smartWakeWindowMinutes: Int
     let targetBrightness: Int
+    let startColorHue: Double
+    let startColorSaturation: Double
+    let startColorBrightness: Double
+    let endColorHue: Double
+    let endColorSaturation: Double
+    let endColorBrightness: Double
+    let skipColorWrites: Bool
+    let lightIdentifiers: [String]
     let lightNames: [String]
     var hapticPatternRaw: String
 
@@ -32,6 +40,14 @@ extension WatchScheduleSnapshot {
             usesSmartWake: schedule.usesSmartWake,
             smartWakeWindowMinutes: schedule.smartWakeWindowMinutes,
             targetBrightness: schedule.targetBrightness,
+            startColorHue: schedule.startColorHue,
+            startColorSaturation: schedule.startColorSaturation,
+            startColorBrightness: schedule.startColorBrightness,
+            endColorHue: schedule.endColorHue,
+            endColorSaturation: schedule.endColorSaturation,
+            endColorBrightness: schedule.endColorBrightness,
+            skipColorWrites: schedule.skipColorWrites,
+            lightIdentifiers: schedule.lightIdentifiers,
             lightNames: schedule.lightNames,
             hapticPatternRaw: schedule.hapticPatternRaw
         )

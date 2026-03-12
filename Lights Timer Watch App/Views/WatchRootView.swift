@@ -153,13 +153,17 @@ struct WatchRootView: View {
         sessionController.startTestHaptics(
             pattern: HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
         )
-        // Send test trigger to phone for rapid light ramp
+        let lightsHandledOnWatch = sessionController.startTestLights(for: schedule)
+
+        // Notify the phone for status/history, but avoid a duplicate phone-side ramp
+        // when the watch already owns the HomeKit writes.
         sessionManager.sendTestTrigger(SmartWakeTriggerPayload(
             scheduleID: schedule.id,
             triggerDate: Date(),
             confidence: 1.0,
             heartRateAtTrigger: nil,
-            motionLevel: nil
+            motionLevel: nil,
+            lightsHandledOnWatch: lightsHandledOnWatch ? true : nil
         ))
     }
 

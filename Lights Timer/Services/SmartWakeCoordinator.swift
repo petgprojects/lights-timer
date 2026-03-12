@@ -44,6 +44,9 @@ final class SmartWakeCoordinator {
     func handleTrigger(_ trigger: SmartWakeTriggerPayload) async {
         print("[SmartWakeCoordinator] Trigger received for schedule \(trigger.scheduleID), confidence: \(trigger.confidence)")
 
+        // Wait for HomeKit to discover homes (may take a few seconds when woken in background)
+        await scheduleEngine.homeKitService.waitForReady()
+
         let context = ModelContext(modelContainer)
         let processed = await processValidatedTrigger(trigger, modelContext: context)
         if !processed {
@@ -111,6 +114,16 @@ final class SmartWakeCoordinator {
                 }
             }
 
+            if trigger.lightsHandledOnWatch == true {
+                firedToday[scheduleID] = triggerDate
+                schedule.lastSmartWakeTriggerAt = triggerDate
+                try? modelContext.save()
+
+                lastTriggerResult = "Smart wake started on watch at \(formatTime(triggerDate))"
+                print("[SmartWakeCoordinator] Watch handled smart wake lights for '\(schedule.name)'")
+                return true
+            }
+
             // 6. Don't start if engine is already running
             guard !scheduleEngine.isRunning else {
                 lastTriggerResult = "Ramp already running"
@@ -160,6 +173,9 @@ final class SmartWakeCoordinator {
 
     /// Handles a test trigger from the watch — bypasses schedule validation.
     private func handleTestTrigger(_ trigger: SmartWakeTriggerPayload) async {
+        // Wait for HomeKit to discover homes (may take a few seconds when woken in background)
+        await scheduleEngine.homeKitService.waitForReady()
+
         let context = ModelContext(modelContainer)
         do {
             let descriptor = FetchDescriptor<LightSchedule>()
@@ -172,6 +188,13 @@ final class SmartWakeCoordinator {
                 lastTriggerResult = "Test: ramp already running"
                 return
             }
+
+            if trigger.lightsHandledOnWatch == true {
+                lastTriggerResult = "Test ramp started on watch for '\(schedule.name)'"
+                print("[SmartWakeCoordinator] Watch handled test ramp for '\(schedule.name)'")
+                return
+            }
+
             await scheduleEngine.startSmartWakeExecution(for: schedule)
             lastTriggerResult = "Test ramp started for '\(schedule.name)'"
             print("[SmartWakeCoordinator] Test ramp started for '\(schedule.name)'")

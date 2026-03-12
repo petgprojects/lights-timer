@@ -150,6 +150,14 @@
 					};
 					30A5401E61AB489059FFFA8C = {
 						CreatedOnToolsVersion = 26.2;
+						SystemCapabilities = {
+							com.apple.BackgroundModes = {
+								enabled = 1;
+							};
+							com.apple.HealthKit = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
@@ -417,10 +425,10 @@
 				DEVELOPMENT_TEAM = 39JCQY86NE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Lights-Timer-Watch-App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Lights Timer";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Lights Timer uses heart rate data to detect the optimal wake moment during your smart wake window.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Lights Timer records a background workout session to collect sensor data for smart wake detection.";
-				INFOPLIST_KEY_WKBackgroundModes = "workout-processing smart-alarm";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.PeterGelgor.Lights-Timer";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer.watchkitapp";
@@ -448,10 +456,10 @@
 				DEVELOPMENT_TEAM = 39JCQY86NE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Lights-Timer-Watch-App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Lights Timer";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Lights Timer uses heart rate data to detect the optimal wake moment during your smart wake window.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Lights Timer records a background workout session to collect sensor data for smart wake detection.";
-				INFOPLIST_KEY_WKBackgroundModes = "workout-processing smart-alarm";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.PeterGelgor.Lights-Timer";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer.watchkitapp";

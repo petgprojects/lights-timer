@@ -6,6 +6,23 @@ struct SmartWakeTriggerPayload: Codable {
     let confidence: Double
     let heartRateAtTrigger: Double?
     let motionLevel: Double?
+    let lightsHandledOnWatch: Bool?
+
+    init(
+        scheduleID: UUID,
+        triggerDate: Date,
+        confidence: Double,
+        heartRateAtTrigger: Double?,
+        motionLevel: Double?,
+        lightsHandledOnWatch: Bool? = nil
+    ) {
+        self.scheduleID = scheduleID
+        self.triggerDate = triggerDate
+        self.confidence = confidence
+        self.heartRateAtTrigger = heartRateAtTrigger
+        self.motionLevel = motionLevel
+        self.lightsHandledOnWatch = lightsHandledOnWatch
+    }
 }
 
 struct SmartWakeSessionState: Codable {

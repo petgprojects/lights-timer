@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSHomeKitUsageDescription</key>
+	<string>Lights Timer needs access to your HomeKit lights so the watch can start your wake-up light ramp.</string>
+	<key>UIBackgroundModes</key>
+	<array/>
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>alarm</string>
+		<string>workout-processing</string>
+	</array>
+</dict>
+</plist>

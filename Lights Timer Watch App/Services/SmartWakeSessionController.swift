@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import HomeKit
 #if os(watchOS)
 import WatchKit
 #endif
@@ -20,11 +21,16 @@ final class SmartWakeSessionController: NSObject {
     /// Set by SmartAlarmScheduler before monitoring starts.
     var hapticPatternType: HapticPattern = .gentle
 
+    private let homeKitService: WatchHomeKitService
+    private let lightController: WatchLightController
+
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
     private var wakeCheckTimer: Timer?
+    private var lightRampTask: Task<Void, Never>?
 
+    private var currentSchedule: WatchScheduleSnapshot?
     private var wakeUpTime: Date?
     private var windowStartTime: Date?
 
@@ -35,6 +41,13 @@ final class SmartWakeSessionController: NSObject {
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
+
+    override init() {
+        let homeKitService = WatchHomeKitService()
+        self.homeKitService = homeKitService
+        self.lightController = WatchLightController(homeKitService: homeKitService)
+        super.init()
+    }
 
     // MARK: - Authorization
 
@@ -61,15 +74,17 @@ final class SmartWakeSessionController: NSObject {
     // MARK: - Session Lifecycle
 
     func startMonitoring(
-        scheduleID: UUID,
-        wakeUpTime: Date,
-        windowMinutes: Int
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date
     ) async {
         guard sessionState == .idle else { return }
 
-        self.currentScheduleID = scheduleID
+        self.currentSchedule = schedule
+        self.currentScheduleID = schedule.id
         self.wakeUpTime = wakeUpTime
-        self.windowStartTime = wakeUpTime.addingTimeInterval(-Double(windowMinutes) * 60)
+        self.windowStartTime = wakeUpTime.addingTimeInterval(
+            -Double(schedule.smartWakeWindowMinutes) * 60
+        )
 
         heuristicEngine.reset()
         sessionState = .monitoring
@@ -79,7 +94,7 @@ final class SmartWakeSessionController: NSObject {
             try await startWorkoutSession()
             startHeartRateQuery()
             startWakeCheckTimer()
-            print("[SmartWakeSession] Monitoring started for schedule \(scheduleID)")
+            print("[SmartWakeSession] Monitoring started for schedule \(schedule.id)")
         } catch {
             sessionState = .failed
             errorMessage = "Failed to start session: \(error.localizedDescription)"
@@ -97,12 +112,15 @@ final class SmartWakeSessionController: NSObject {
         }
 
         stopHaptics()
+        lightRampTask?.cancel()
+        lightRampTask = nil
 
         Task {
             await endWorkoutSession()
         }
 
         sessionState = .idle
+        currentSchedule = nil
         currentScheduleID = nil
         wakeUpTime = nil
         windowStartTime = nil
@@ -227,13 +245,15 @@ final class SmartWakeSessionController: NSObject {
         notifyStateChange()
 
         let latestHR = heuristicEngine.currentConfidence > 0 ? Double(Int(confidence * 100)) : nil
+        let lightsHandledOnWatch = currentSchedule.map(startLocalLightRamp(for:)) == true
 
         let payload = SmartWakeTriggerPayload(
             scheduleID: scheduleID,
             triggerDate: Date(),
             confidence: confidence,
             heartRateAtTrigger: latestHR,
-            motionLevel: nil
+            motionLevel: nil,
+            lightsHandledOnWatch: lightsHandledOnWatch ? true : nil
         )
 
         onTrigger?(payload)
@@ -262,6 +282,92 @@ final class SmartWakeSessionController: NSObject {
         hapticPatternType = pattern
         startHapticRamp()
         #endif
+    }
+
+    @discardableResult
+    func startTestLights(for schedule: WatchScheduleSnapshot) -> Bool {
+        startLocalLightRamp(for: schedule)
+    }
+
+    // MARK: - HomeKit Lights
+
+    @discardableResult
+    private func startLocalLightRamp(for schedule: WatchScheduleSnapshot) -> Bool {
+        let identifiers = schedule.lightIdentifiers.compactMap(UUID.init(uuidString:))
+        guard !identifiers.isEmpty else {
+            print("[SmartWakeSession] No light identifiers available for '\(schedule.name)'")
+            return false
+        }
+
+        lightRampTask?.cancel()
+        lightRampTask = Task { [weak self] in
+            await self?.runLocalLightRamp(for: schedule, identifiers: identifiers)
+        }
+        return true
+    }
+
+    private func runLocalLightRamp(
+        for schedule: WatchScheduleSnapshot,
+        identifiers: [UUID]
+    ) async {
+        await homeKitService.waitForReady()
+
+        let rampDuration: TimeInterval = 60
+        let stepInterval: TimeInterval = 5
+        let stepCount = max(Int(rampDuration / stepInterval), 1)
+
+        print("[SmartWakeSession] Starting watch HomeKit ramp for '\(schedule.name)'")
+
+        for step in 0...stepCount {
+            if Task.isCancelled { return }
+
+            let progress = min(Double(step) / Double(stepCount), 1.0)
+            let brightness = watchInterpolateBrightness(
+                target: schedule.targetBrightness,
+                progress: progress
+            )
+            let hsb = watchInterpolateHSB(
+                startHue: schedule.startColorHue,
+                startSat: schedule.startColorSaturation,
+                startBri: schedule.startColorBrightness,
+                endHue: schedule.endColorHue,
+                endSat: schedule.endColorSaturation,
+                endBri: schedule.endColorBrightness,
+                progress: progress
+            )
+
+            do {
+                try await lightController.applyToMultipleLights(
+                    brightness: brightness,
+                    hue: hsb.hue * 360.0,
+                    saturation: hsb.saturation * 100.0,
+                    powerOn: true,
+                    skipColor: schedule.skipColorWrites,
+                    identifiers: identifiers,
+                    names: schedule.lightNames
+                )
+            } catch {
+                print("[SmartWakeSession] Watch HomeKit write failed at step \(step): \(error)")
+            }
+
+            if step < stepCount {
+                try? await Task.sleep(for: .seconds(stepInterval))
+            }
+        }
+
+        do {
+            try await lightController.applyToMultipleLights(
+                brightness: schedule.targetBrightness,
+                hue: schedule.endColorHue * 360.0,
+                saturation: schedule.endColorSaturation * 100.0,
+                powerOn: true,
+                skipColor: schedule.skipColorWrites,
+                identifiers: identifiers,
+                names: schedule.lightNames
+            )
+        } catch {
+            print("[SmartWakeSession] Watch HomeKit final write failed: \(error)")
+        }
     }
 
     // MARK: - Haptic Alarm (WKInterfaceDevice)
@@ -411,4 +517,228 @@ extension SmartWakeSessionController: HKLiveWorkoutBuilderDelegate {
     ) {
         // Heart rate data is handled by the anchored query
     }
+}
+
+// MARK: - Watch HomeKit
+
+private final class WatchHomeKitService: NSObject, HMHomeManagerDelegate {
+    private let homeManager: HMHomeManager
+
+    private(set) var homes: [HMHome] = []
+    private(set) var availableLights: [HMAccessory] = []
+
+    override init() {
+        homeManager = HMHomeManager()
+        super.init()
+        homeManager.delegate = self
+    }
+
+    func waitForReady(timeout: TimeInterval = 10) async {
+        if !homes.isEmpty { return }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while homes.isEmpty && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
+    nonisolated func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
+        MainActor.assumeIsolated {
+            homes = manager.homes
+            availableLights = homes.flatMap { home in
+                home.accessories.filter { accessory in
+                    accessory.services.contains { $0.serviceType == HMServiceTypeLightbulb }
+                }
+            }
+        }
+    }
+
+    func setBrightness(_ value: Int, for accessoryID: UUID, named accessoryName: String? = nil) async throws {
+        try await writeValue(
+            value,
+            for: findCharacteristic(
+                type: HMCharacteristicTypeBrightness,
+                for: accessoryID,
+                named: accessoryName
+            )
+        )
+    }
+
+    func setHue(_ value: Double, for accessoryID: UUID, named accessoryName: String? = nil) async throws {
+        try await writeValue(
+            value,
+            for: findCharacteristic(
+                type: HMCharacteristicTypeHue,
+                for: accessoryID,
+                named: accessoryName
+            )
+        )
+    }
+
+    func setSaturation(_ value: Double, for accessoryID: UUID, named accessoryName: String? = nil) async throws {
+        try await writeValue(
+            value,
+            for: findCharacteristic(
+                type: HMCharacteristicTypeSaturation,
+                for: accessoryID,
+                named: accessoryName
+            )
+        )
+    }
+
+    func setPowerState(_ on: Bool, for accessoryID: UUID, named accessoryName: String? = nil) async throws {
+        try await writeValue(
+            on,
+            for: findCharacteristic(
+                type: HMCharacteristicTypePowerState,
+                for: accessoryID,
+                named: accessoryName
+            )
+        )
+    }
+
+    private func findCharacteristic(
+        type: String,
+        for accessoryID: UUID,
+        named accessoryName: String?
+    ) throws -> HMCharacteristic {
+        let accessory = availableLights.first(where: { $0.uniqueIdentifier == accessoryID })
+            ?? availableLights.first(where: { accessory in
+                guard let accessoryName else { return false }
+                return accessory.name == accessoryName
+            })
+
+        guard let accessory else {
+            let available = availableLights.map {
+                "\($0.name) [\($0.uniqueIdentifier.uuidString)]"
+            }.joined(separator: ", ")
+            print("[WatchHomeKit] No accessory match for id=\(accessoryID.uuidString), name=\(accessoryName ?? "<nil>"). Available lights: \(available)")
+            throw WatchHomeKitServiceError.accessoryNotFound
+        }
+
+        guard let service = accessory.services.first(where: { $0.serviceType == HMServiceTypeLightbulb }) else {
+            throw WatchHomeKitServiceError.serviceNotFound
+        }
+
+        guard let characteristic = service.characteristics.first(where: {
+            $0.characteristicType == type
+        }) else {
+            throw WatchHomeKitServiceError.characteristicNotFound
+        }
+
+        return characteristic
+    }
+
+    private func writeValue(_ value: Any, for characteristic: HMCharacteristic) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            characteristic.writeValue(value) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+}
+
+private enum WatchHomeKitServiceError: LocalizedError {
+    case accessoryNotFound
+    case serviceNotFound
+    case characteristicNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .accessoryNotFound: "Light accessory not found"
+        case .serviceNotFound: "Lightbulb service not found"
+        case .characteristicNotFound: "Characteristic not found on light"
+        }
+    }
+}
+
+private final class WatchLightController {
+    private let homeKitService: WatchHomeKitService
+
+    init(homeKitService: WatchHomeKitService) {
+        self.homeKitService = homeKitService
+    }
+
+    func applyToMultipleLights(
+        brightness: Int,
+        hue: Double,
+        saturation: Double,
+        powerOn: Bool,
+        skipColor: Bool,
+        identifiers: [UUID],
+        names: [String]
+    ) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for (index, id) in identifiers.enumerated() {
+                let accessoryName = names.indices.contains(index) ? names[index] : nil
+                group.addTask {
+                    try await self.homeKitService.setPowerState(
+                        powerOn,
+                        for: id,
+                        named: accessoryName
+                    )
+                    try await self.homeKitService.setBrightness(
+                        brightness,
+                        for: id,
+                        named: accessoryName
+                    )
+
+                    guard !skipColor else { return }
+
+                    do {
+                        try await self.homeKitService.setHue(
+                            hue,
+                            for: id,
+                            named: accessoryName
+                        )
+                        try await self.homeKitService.setSaturation(
+                            saturation,
+                            for: id,
+                            named: accessoryName
+                        )
+                    } catch WatchHomeKitServiceError.characteristicNotFound {
+                        // White-only bulbs do not expose hue/saturation.
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+    }
+}
+
+private func watchInterpolateHSB(
+    startHue: Double,
+    startSat: Double,
+    startBri: Double,
+    endHue: Double,
+    endSat: Double,
+    endBri: Double,
+    progress: Double
+) -> (hue: Double, saturation: Double, brightness: Double) {
+    let t = min(max(progress, 0), 1)
+
+    var deltaHue = endHue - startHue
+    if deltaHue > 0.5 {
+        deltaHue -= 1.0
+    } else if deltaHue < -0.5 {
+        deltaHue += 1.0
+    }
+
+    var hue = startHue + deltaHue * t
+    if hue < 0 { hue += 1.0 }
+    if hue > 1 { hue -= 1.0 }
+
+    let saturation = startSat + (endSat - startSat) * t
+    let brightness = startBri + (endBri - startBri) * t
+
+    return (hue: hue, saturation: saturation, brightness: brightness)
+}
+
+private func watchInterpolateBrightness(target: Int, progress: Double) -> Int {
+    let t = min(max(progress, 0), 1)
+    return Int(Double(target) * t)
 }

@@ -33,17 +33,14 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 WCMessageKey.payload: data
             ]
 
-            if session.isReachable {
-                session.sendMessage(message, replyHandler: { reply in
-                    print("[WatchSession] Trigger sent, reply: \(reply)")
-                }, errorHandler: { error in
-                    print("[WatchSession] sendMessage failed: \(error), using transferUserInfo")
-                    session.transferUserInfo(message)
-                })
-            } else {
+            // On watchOS, sendMessage wakes the iPhone app in the background
+            // even when isReachable is false — always attempt it first.
+            session.sendMessage(message, replyHandler: { reply in
+                print("[WatchSession] Trigger sent, reply: \(reply)")
+            }, errorHandler: { error in
+                print("[WatchSession] sendMessage failed: \(error), using transferUserInfo")
                 session.transferUserInfo(message)
-                print("[WatchSession] Phone not reachable, queued via transferUserInfo")
-            }
+            })
         } catch {
             print("[WatchSession] Failed to encode trigger: \(error)")
         }
@@ -98,13 +95,15 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 WCMessageKey.type: WCMessageKey.testTrigger,
                 WCMessageKey.payload: data
             ]
-            if session.isReachable {
-                session.sendMessage(message, replyHandler: { reply in
-                    print("[WatchSession] Test trigger sent, reply: \(reply)")
-                }, errorHandler: { error in
-                    print("[WatchSession] sendMessage (test) failed: \(error)")
-                })
-            }
+
+            // On watchOS, sendMessage wakes the iPhone app in the background
+            // even when isReachable is false — always attempt it first.
+            session.sendMessage(message, replyHandler: { reply in
+                print("[WatchSession] Test trigger sent, reply: \(reply)")
+            }, errorHandler: { error in
+                print("[WatchSession] sendMessage (test) failed: \(error), using transferUserInfo")
+                session.transferUserInfo(message)
+            })
         } catch {
             print("[WatchSession] Failed to encode test trigger: \(error)")
         }

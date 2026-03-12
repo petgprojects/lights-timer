@@ -11,6 +11,10 @@ final class SmartAlarmScheduler: NSObject {
     private var extendedSession: WKExtendedRuntimeSession?
     private var monitoringTimer: Timer?
 
+    /// Tracks which schedule the current session is for, to avoid unnecessary churn.
+    private var currentSessionScheduleID: UUID?
+    private var currentSessionWakeTime: Date?
+
     private let sessionController: SmartWakeSessionController
     private let sessionManager: WatchSessionManager
 
@@ -54,9 +58,16 @@ final class SmartAlarmScheduler: NSObject {
         let sessionStartTime = windowStart.addingTimeInterval(-sessionLeadTime)
         let now = Date()
 
-        // Already monitoring this schedule
+        // Already monitoring or scheduled for this exact schedule — skip
         if sessionController.currentScheduleID == nextSchedule.id,
            sessionController.sessionState == .monitoring {
+            return
+        }
+        if currentSessionScheduleID == nextSchedule.id,
+           currentSessionWakeTime == wakeUpTime,
+           extendedSession != nil,
+           extendedSession?.state == .running || extendedSession?.state == .scheduled {
+            print("[SmartAlarmScheduler] Session already active for '\(nextSchedule.name)', skipping")
             return
         }
 
@@ -84,6 +95,8 @@ final class SmartAlarmScheduler: NSObject {
         let session = WKExtendedRuntimeSession()
         session.delegate = self
         self.extendedSession = session
+        currentSessionScheduleID = schedule.id
+        currentSessionWakeTime = wakeUpTime
         session.start()
 
         isAlarmSessionActive = true
@@ -106,6 +119,8 @@ final class SmartAlarmScheduler: NSObject {
         let session = WKExtendedRuntimeSession()
         session.delegate = self
         self.extendedSession = session
+        currentSessionScheduleID = schedule.id
+        currentSessionWakeTime = wakeUpTime
         session.start(at: date)
 
         scheduledMonitoringDate = windowStart
@@ -128,6 +143,8 @@ final class SmartAlarmScheduler: NSObject {
         }
         extendedSession = nil
         pendingSchedule = nil
+        currentSessionScheduleID = nil
+        currentSessionWakeTime = nil
         isAlarmSessionActive = false
         sessionController.isAlarmSessionActive = false
         scheduledMonitoringDate = nil
@@ -172,9 +189,8 @@ final class SmartAlarmScheduler: NSObject {
 
         Task {
             await sessionController.startMonitoring(
-                scheduleID: schedule.id,
-                wakeUpTime: wakeUpTime,
-                windowMinutes: schedule.smartWakeWindowMinutes
+                schedule: schedule,
+                wakeUpTime: wakeUpTime
             )
             print("[SmartAlarmScheduler] HR monitoring started for '\(schedule.name)' with haptic: \(sessionController.hapticPatternType.displayName)")
         }

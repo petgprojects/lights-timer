@@ -16,6 +16,18 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
         homeManager.delegate = self
     }
 
+    /// Waits for HomeKit homes to be available. Returns immediately if already ready.
+    /// Times out after the specified interval to avoid blocking indefinitely.
+    func waitForReady(timeout: TimeInterval = 10) async {
+        if !homes.isEmpty { return }
+
+        // Poll for readiness — HMHomeManager fires its delegate on main thread
+        let deadline = Date().addingTimeInterval(timeout)
+        while homes.isEmpty && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
     // MARK: - HMHomeManagerDelegate
 
     nonisolated func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
