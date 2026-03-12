@@ -676,8 +676,54 @@ private final class WatchLightController {
             for (index, id) in identifiers.enumerated() {
                 let accessoryName = names.indices.contains(index) ? names[index] : nil
                 group.addTask {
+                    guard powerOn else {
+                        try await self.homeKitService.setPowerState(
+                            false,
+                            for: id,
+                            named: accessoryName
+                        )
+                        return
+                    }
+
+                    if brightness <= 0 {
+                        try? await self.homeKitService.setBrightness(
+                            0,
+                            for: id,
+                            named: accessoryName
+                        )
+                        try await self.homeKitService.setPowerState(
+                            false,
+                            for: id,
+                            named: accessoryName
+                        )
+                        return
+                    }
+
+                    try? await self.homeKitService.setBrightness(
+                        brightness,
+                        for: id,
+                        named: accessoryName
+                    )
+
+                    if !skipColor {
+                        do {
+                            try await self.homeKitService.setHue(
+                                hue,
+                                for: id,
+                                named: accessoryName
+                            )
+                            try await self.homeKitService.setSaturation(
+                                saturation,
+                                for: id,
+                                named: accessoryName
+                            )
+                        } catch WatchHomeKitServiceError.characteristicNotFound {
+                            // White-only bulbs do not expose hue/saturation.
+                        }
+                    }
+
                     try await self.homeKitService.setPowerState(
-                        powerOn,
+                        true,
                         for: id,
                         named: accessoryName
                     )
@@ -686,23 +732,6 @@ private final class WatchLightController {
                         for: id,
                         named: accessoryName
                     )
-
-                    guard !skipColor else { return }
-
-                    do {
-                        try await self.homeKitService.setHue(
-                            hue,
-                            for: id,
-                            named: accessoryName
-                        )
-                        try await self.homeKitService.setSaturation(
-                            saturation,
-                            for: id,
-                            named: accessoryName
-                        )
-                    } catch WatchHomeKitServiceError.characteristicNotFound {
-                        // White-only bulbs do not expose hue/saturation.
-                    }
                 }
             }
             try await group.waitForAll()

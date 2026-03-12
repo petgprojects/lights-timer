@@ -16,19 +16,35 @@ final class LightController {
         skipColor: Bool = false,
         to accessoryID: UUID
     ) async throws {
-        try await homeKitService.setPowerState(powerOn, for: accessoryID)
-        try await homeKitService.setBrightness(brightness, for: accessoryID)
+        guard powerOn else {
+            try await homeKitService.setPowerState(false, for: accessoryID)
+            return
+        }
+
+        if brightness <= 0 {
+            // Keep the bulb fully off at ramp start to avoid a flash at its last remembered level.
+            try? await homeKitService.setBrightness(0, for: accessoryID)
+            try await homeKitService.setPowerState(false, for: accessoryID)
+            return
+        }
+
+        // Best effort: stage brightness/color before powering on so the bulb does not blink at its
+        // previous level when the power state flips.
+        try? await homeKitService.setBrightness(brightness, for: accessoryID)
 
         // Skip color writes to preserve Adaptive Lighting
-        guard !skipColor else { return }
-
-        // Color characteristics may not be available on white-only bulbs
-        do {
-            try await homeKitService.setHue(hue, for: accessoryID)
-            try await homeKitService.setSaturation(saturation, for: accessoryID)
-        } catch HomeKitServiceError.characteristicNotFound {
-            // Light doesn't support color -- skip gracefully
+        if !skipColor {
+            // Color characteristics may not be available on white-only bulbs
+            do {
+                try await homeKitService.setHue(hue, for: accessoryID)
+                try await homeKitService.setSaturation(saturation, for: accessoryID)
+            } catch HomeKitServiceError.characteristicNotFound {
+                // Light doesn't support color -- skip gracefully
+            }
         }
+
+        try await homeKitService.setPowerState(true, for: accessoryID)
+        try await homeKitService.setBrightness(brightness, for: accessoryID)
     }
 
     func applyToMultipleLights(
