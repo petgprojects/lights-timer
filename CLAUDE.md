@@ -97,6 +97,8 @@ Assets.xcassets/                   AppIcon, AccentColor
 | targetBrightness | Int | Final brightness 0-100 |
 | startColorHue/Sat/Bri | Double | Ramp start color (HSB 0-1) |
 | endColorHue/Sat/Bri | Double | Ramp end color (HSB 0-1) |
+| startColorIsAdaptive | Bool | Use Adaptive Lighting instead of start color (default false) |
+| endColorIsAdaptive | Bool | Use Adaptive Lighting instead of end color (default false) |
 | isEnabled | Bool | Active toggle |
 | lightIdentifiers | [String] | HomeKit accessory UUID strings |
 | lightNames | [String] | Display names (parallel array) |
@@ -106,7 +108,7 @@ Assets.xcassets/                   AppIcon, AccentColor
 | lastSmartWakeTriggerAt | Date? | Last smart wake fire time |
 | createdAt | Date | Creation timestamp |
 
-Computed: `activeDays: Set<DayOfWeek>`, `wakeUpTimeString`, `activeDaysSummary`
+Computed: `activeDays: Set<DayOfWeek>`, `wakeUpTimeString`, `activeDaysSummary`, `skipColorWrites: Bool` (true when either color is adaptive)
 
 ### WatchScheduleSnapshot (Codable, Equatable)
 Lightweight mirror of LightSchedule for WCSession transfer. Contains: id, name, wakeUpHour/Minute, activeDaysRaw, leadTimeMinutes, usesSmartWake, smartWakeWindowMinutes, targetBrightness, lightNames, hapticPatternRaw. iPhone copy has `init(from: LightSchedule)` extension.
@@ -147,6 +149,7 @@ HealthKitAuthorizationService    (all injected as @Environment)
 1. **Background**: `syncBackgroundScenes` creates `HMActionSet` scenes + `HMTimerTrigger` per minute step, named `LT_<shortID>_<step>`. Fires on HomeKit hub regardless of app state.
 2. **Foreground**: `checkForActiveSchedules` detects in-progress window, starts 15-second `Timer.publish` for smooth direct writes via `LightController.applyToMultipleLights`. Smart wake schedules are **skipped** — they only trigger via the watch.
 3. Progress calculated as `elapsed / total`, brightness and color interpolated linearly.
+4. **Adaptive Lighting mode**: When `skipColorWrites` is true (either start or end color set to Adaptive), all hue/saturation writes are skipped in both foreground execution and background scenes. Only brightness + power are written, so HomeKit Adaptive Lighting on the bulb is not overridden. `LightController.applyToMultipleLights` accepts a `skipColor` parameter. The `ColorPreferenceView` shows per-color Adaptive toggles; when toggled, the color picker is hidden and the gradient preview shows a warm-to-cool approximation.
 
 ### Smart Wake (usesSmartWake == true)
 1. **No gradual ramp**: Smart wake schedules do NOT create per-minute background scenes or trigger foreground timers. Only a single fallback scene (`LT_<shortID>_fallback`) is created at the exact wake time, snapping lights to full brightness if the watch never triggers.

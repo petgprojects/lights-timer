@@ -21,11 +21,21 @@ final class LightSchedule {
     var lightNames: [String]
     var createdAt: Date
 
+    // Adaptive Lighting
+    var startColorIsAdaptive: Bool = false
+    var endColorIsAdaptive: Bool = false
+
     // Smart Wake
     var usesSmartWake: Bool = false
     var smartWakeWindowMinutes: Int = 30
     var hapticPatternRaw: String = "gentle"
     var lastSmartWakeTriggerAt: Date?
+
+    /// When either color is adaptive, all hue/saturation writes are skipped
+    /// so that HomeKit Adaptive Lighting stays active on the bulb.
+    var skipColorWrites: Bool {
+        startColorIsAdaptive || endColorIsAdaptive
+    }
 
     var hapticPattern: HapticPattern {
         get { HapticPattern(rawValue: hapticPatternRaw) ?? .gentle }
@@ -73,6 +83,8 @@ final class LightSchedule {
         endColorBrightness: Double = 1.0,
         lightIdentifiers: [String] = [],
         lightNames: [String] = [],
+        startColorIsAdaptive: Bool = false,
+        endColorIsAdaptive: Bool = false,
         usesSmartWake: Bool = false,
         smartWakeWindowMinutes: Int = 30,
         hapticPatternRaw: String = "gentle"
@@ -93,6 +105,8 @@ final class LightSchedule {
         self.isEnabled = true
         self.lightIdentifiers = lightIdentifiers
         self.lightNames = lightNames
+        self.startColorIsAdaptive = startColorIsAdaptive
+        self.endColorIsAdaptive = endColorIsAdaptive
         self.createdAt = Date()
         self.usesSmartWake = usesSmartWake
         self.smartWakeWindowMinutes = smartWakeWindowMinutes

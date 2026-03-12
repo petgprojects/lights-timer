@@ -131,6 +131,7 @@ final class ScheduleEngine {
                 hue: schedule.endColorHue * 360.0,
                 saturation: schedule.endColorSaturation * 100.0,
                 powerOn: true,
+                skipColor: schedule.skipColorWrites,
                 identifiers: identifiers
             )
             stopForegroundExecution()
@@ -163,6 +164,7 @@ final class ScheduleEngine {
                 hue: hsb.hue * 360.0,
                 saturation: hsb.saturation * 100.0,
                 powerOn: true,
+                skipColor: schedule.skipColorWrites,
                 identifiers: identifiers
             )
         } catch {
@@ -262,6 +264,7 @@ final class ScheduleEngine {
                     hue: hsb.hue * 360.0,
                     saturation: hsb.saturation * 100.0,
                     powerOn: true,
+                    skipColor: schedule.skipColorWrites,
                     identifiers: identifiers
                 )
             } catch {
@@ -279,6 +282,7 @@ final class ScheduleEngine {
             hue: schedule.endColorHue * 360.0,
             saturation: schedule.endColorSaturation * 100.0,
             powerOn: true,
+            skipColor: schedule.skipColorWrites,
             identifiers: identifiers
         )
 
@@ -446,17 +450,20 @@ final class ScheduleEngine {
                         let action = HMCharacteristicWriteAction(characteristic: char, targetValue: schedule.targetBrightness as NSNumber)
                         try await addAction(action, to: actionSet)
                     }
-                    if let char = service.characteristics.first(where: {
-                        $0.characteristicType == HMCharacteristicTypeHue
-                    }) {
-                        let action = HMCharacteristicWriteAction(characteristic: char, targetValue: (schedule.endColorHue * 360.0) as NSNumber)
-                        try await addAction(action, to: actionSet)
-                    }
-                    if let char = service.characteristics.first(where: {
-                        $0.characteristicType == HMCharacteristicTypeSaturation
-                    }) {
-                        let action = HMCharacteristicWriteAction(characteristic: char, targetValue: (schedule.endColorSaturation * 100.0) as NSNumber)
-                        try await addAction(action, to: actionSet)
+                    // Skip color writes to preserve Adaptive Lighting
+                    if !schedule.skipColorWrites {
+                        if let char = service.characteristics.first(where: {
+                            $0.characteristicType == HMCharacteristicTypeHue
+                        }) {
+                            let action = HMCharacteristicWriteAction(characteristic: char, targetValue: (schedule.endColorHue * 360.0) as NSNumber)
+                            try await addAction(action, to: actionSet)
+                        }
+                        if let char = service.characteristics.first(where: {
+                            $0.characteristicType == HMCharacteristicTypeSaturation
+                        }) {
+                            let action = HMCharacteristicWriteAction(characteristic: char, targetValue: (schedule.endColorSaturation * 100.0) as NSNumber)
+                            try await addAction(action, to: actionSet)
+                        }
                     }
                 }
 
@@ -539,24 +546,27 @@ final class ScheduleEngine {
                         try await addAction(action, to: actionSet)
                     }
 
-                    // Hue (color lights only)
-                    if let char = service.characteristics.first(where: {
-                        $0.characteristicType == HMCharacteristicTypeHue
-                    }) {
-                        let action = HMCharacteristicWriteAction(
-                            characteristic: char, targetValue: (hsb.hue * 360.0) as NSNumber
-                        )
-                        try await addAction(action, to: actionSet)
-                    }
+                    // Skip color writes to preserve Adaptive Lighting
+                    if !schedule.skipColorWrites {
+                        // Hue (color lights only)
+                        if let char = service.characteristics.first(where: {
+                            $0.characteristicType == HMCharacteristicTypeHue
+                        }) {
+                            let action = HMCharacteristicWriteAction(
+                                characteristic: char, targetValue: (hsb.hue * 360.0) as NSNumber
+                            )
+                            try await addAction(action, to: actionSet)
+                        }
 
-                    // Saturation (color lights only)
-                    if let char = service.characteristics.first(where: {
-                        $0.characteristicType == HMCharacteristicTypeSaturation
-                    }) {
-                        let action = HMCharacteristicWriteAction(
-                            characteristic: char, targetValue: (hsb.saturation * 100.0) as NSNumber
-                        )
-                        try await addAction(action, to: actionSet)
+                        // Saturation (color lights only)
+                        if let char = service.characteristics.first(where: {
+                            $0.characteristicType == HMCharacteristicTypeSaturation
+                        }) {
+                            let action = HMCharacteristicWriteAction(
+                                characteristic: char, targetValue: (hsb.saturation * 100.0) as NSNumber
+                            )
+                            try await addAction(action, to: actionSet)
+                        }
                     }
                 }
 

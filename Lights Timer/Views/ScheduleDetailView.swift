@@ -22,6 +22,8 @@ struct ScheduleDetailView: View {
     @State private var endHue: Double = 0.0
     @State private var endSaturation: Double = 0.0
     @State private var endBrightness: Double = 1.0
+    @State private var startColorIsAdaptive: Bool = false
+    @State private var endColorIsAdaptive: Bool = false
     @State private var lightIdentifiers: [String] = []
     @State private var lightNames: [String] = []
     @State private var usesSmartWake: Bool = false
@@ -46,7 +48,9 @@ struct ScheduleDetailView: View {
                 startBrightness: $startBrightness,
                 endHue: $endHue,
                 endSaturation: $endSaturation,
-                endBrightness: $endBrightness
+                endBrightness: $endBrightness,
+                startIsAdaptive: $startColorIsAdaptive,
+                endIsAdaptive: $endColorIsAdaptive
             )
         }
         .navigationTitle(isEditing ? "Edit Schedule" : "New Schedule")
@@ -287,6 +291,8 @@ struct ScheduleDetailView: View {
         endBrightness = schedule.endColorBrightness
         lightIdentifiers = schedule.lightIdentifiers
         lightNames = schedule.lightNames
+        startColorIsAdaptive = schedule.startColorIsAdaptive
+        endColorIsAdaptive = schedule.endColorIsAdaptive
         usesSmartWake = schedule.usesSmartWake
         smartWakeWindowMinutes = schedule.smartWakeWindowMinutes
         hapticPattern = schedule.hapticPattern
@@ -329,6 +335,8 @@ struct ScheduleDetailView: View {
             schedule.endColorBrightness = endBrightness
             schedule.lightIdentifiers = lightIdentifiers
             schedule.lightNames = lightNames
+            schedule.startColorIsAdaptive = startColorIsAdaptive
+            schedule.endColorIsAdaptive = endColorIsAdaptive
             schedule.usesSmartWake = usesSmartWake
             schedule.smartWakeWindowMinutes = smartWakeWindowMinutes
             schedule.hapticPatternRaw = hapticPattern.rawValue
@@ -348,6 +356,8 @@ struct ScheduleDetailView: View {
                 endColorBrightness: endBrightness,
                 lightIdentifiers: lightIdentifiers,
                 lightNames: lightNames,
+                startColorIsAdaptive: startColorIsAdaptive,
+                endColorIsAdaptive: endColorIsAdaptive,
                 usesSmartWake: usesSmartWake,
                 smartWakeWindowMinutes: smartWakeWindowMinutes,
                 hapticPatternRaw: hapticPattern.rawValue
