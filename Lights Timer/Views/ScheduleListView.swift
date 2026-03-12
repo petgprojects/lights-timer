@@ -96,6 +96,9 @@ struct ScheduleListView: View {
                             .frame(width: 60)
                             .tint(.orange)
                     }
+                    Button("Stop", role: .destructive) {
+                        scheduleEngine.stopForegroundExecution()
+                    }
                 }
             }
 
@@ -106,17 +109,12 @@ struct ScheduleListView: View {
                     scheduleRow(schedule)
                 }
                 .swipeActions(edge: .leading) {
-                    if schedule.usesSmartWake {
-                        Button {
-                            Task {
-                                await smartWakeCoordinator.simulateTrigger(for: schedule)
-                                await smartWakeCoordinator.processPendingTrigger(modelContext: modelContext)
-                            }
-                        } label: {
-                            Label("Test Wake", systemImage: "bolt.fill")
-                        }
-                        .tint(.blue)
+                    Button {
+                        scheduleEngine.startTestExecution(for: schedule)
+                    } label: {
+                        Label("Test Lights", systemImage: "lightbulb.fill")
                     }
+                    .tint(.orange)
                 }
             }
             .onDelete(perform: deleteSchedules)
@@ -225,12 +223,13 @@ struct ScheduleListView: View {
         homeKitService: service,
         lightController: LightController(homeKitService: service)
     )
+    let container = try! ModelContainer(for: LightSchedule.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     NavigationStack {
         ScheduleListView()
     }
-    .modelContainer(for: LightSchedule.self, inMemory: true)
+    .modelContainer(container)
     .environment(service)
     .environment(engine)
-    .environment(SmartWakeCoordinator(scheduleEngine: engine, watchConnectivity: connectivity))
+    .environment(SmartWakeCoordinator(scheduleEngine: engine, watchConnectivity: connectivity, modelContainer: container))
     .environment(connectivity)
 }

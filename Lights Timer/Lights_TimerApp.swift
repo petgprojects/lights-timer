@@ -3,6 +3,7 @@ import SwiftData
 
 @main
 struct Lights_TimerApp: App {
+    let modelContainer: ModelContainer
     @State private var homeKitService = HomeKitService()
     @State private var lightController: LightController
     @State private var scheduleEngine: ScheduleEngine
@@ -11,13 +12,17 @@ struct Lights_TimerApp: App {
     @State private var healthKitAuth = HealthKitAuthorizationService()
 
     init() {
+        let container = try! ModelContainer(for: LightSchedule.self)
+        self.modelContainer = container
+
         let service = HomeKitService()
         let controller = LightController(homeKitService: service)
         let engine = ScheduleEngine(homeKitService: service, lightController: controller)
         let connectivity = WatchConnectivityService()
         let coordinator = SmartWakeCoordinator(
             scheduleEngine: engine,
-            watchConnectivity: connectivity
+            watchConnectivity: connectivity,
+            modelContainer: container
         )
 
         _homeKitService = State(initialValue: service)
@@ -36,6 +41,6 @@ struct Lights_TimerApp: App {
                 .environment(smartWakeCoordinator)
                 .environment(healthKitAuth)
         }
-        .modelContainer(for: LightSchedule.self)
+        .modelContainer(modelContainer)
     }
 }

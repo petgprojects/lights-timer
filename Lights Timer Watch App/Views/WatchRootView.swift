@@ -1,14 +1,18 @@
 import SwiftUI
+#if os(watchOS)
+import WatchKit
+#endif
 
 struct WatchRootView: View {
     @Environment(WatchSessionManager.self) private var sessionManager
     @Environment(SmartWakeSessionController.self) private var sessionController
 
     var body: some View {
+        @Bindable var sm = sessionManager
         NavigationStack {
             List {
                 statusSection
-                schedulesSection
+                schedulesSection(schedules: $sm.activeSchedules)
                 diagnosticsSection
             }
             .navigationTitle("Lights Timer")
@@ -42,27 +46,50 @@ struct WatchRootView: View {
         }
     }
 
-    private var schedulesSection: some View {
+    private func schedulesSection(schedules: Binding<[WatchScheduleSnapshot]>) -> some View {
         Section("Smart Wake Schedules") {
             if sessionManager.activeSchedules.isEmpty {
                 Text("No smart wake schedules")
                     .foregroundStyle(.secondary)
                     .font(.caption)
             } else {
-                ForEach(sessionManager.activeSchedules) { schedule in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(schedule.name)
-                                .font(.headline)
-                            Text(schedule.wakeUpTimeString)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                ForEach(schedules.indices, id: \.self) { index in
+                    let schedule = sessionManager.activeSchedules[index]
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(schedule.name)
+                                    .font(.headline)
+                                Text(schedule.wakeUpTimeString)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if sessionController.currentScheduleID == schedule.id {
+                                Image(systemName: "waveform.circle.fill")
+                                    .foregroundStyle(.green)
+                            }
                         }
-                        Spacer()
-                        if sessionController.currentScheduleID == schedule.id {
-                            Image(systemName: "waveform.circle.fill")
-                                .foregroundStyle(.green)
+
+                        Picker("Haptic", selection: schedules[index].hapticPatternRaw) {
+                            ForEach(HapticPattern.allCases) { pattern in
+                                Text(pattern.displayName).tag(pattern.rawValue)
+                            }
                         }
+                        .onChange(of: schedule.hapticPatternRaw) { _, newValue in
+                            playWatchHapticPreview(for: HapticPattern(rawValue: newValue) ?? .gentle)
+                            sessionManager.sendHapticPatternChange(
+                                scheduleID: schedule.id,
+                                pattern: newValue
+                            )
+                        }
+
+                        Button {
+                            testAlarm(for: schedule)
+                        } label: {
+                            Label("Test Alarm", systemImage: "play.fill")
+                        }
+                        .tint(.orange)
                     }
                 }
             }
@@ -105,6 +132,35 @@ struct WatchRootView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Actions
+
+    private func playWatchHapticPreview(for pattern: HapticPattern) {
+        #if os(watchOS)
+        let device = WKInterfaceDevice.current()
+        switch pattern {
+        case .gentle: device.play(.click)
+        case .pulse: device.play(.start)
+        case .heartbeat: device.play(.directionUp)
+        case .alarm: device.play(.notification)
+        }
+        #endif
+    }
+
+    private func testAlarm(for schedule: WatchScheduleSnapshot) {
+        // Play haptics on watch
+        sessionController.startTestHaptics(
+            pattern: HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
+        )
+        // Send test trigger to phone for rapid light ramp
+        sessionManager.sendTestTrigger(SmartWakeTriggerPayload(
+            scheduleID: schedule.id,
+            triggerDate: Date(),
+            confidence: 1.0,
+            heartRateAtTrigger: nil,
+            motionLevel: nil
+        ))
     }
 
     // MARK: - Status Helpers

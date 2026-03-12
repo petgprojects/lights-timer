@@ -39,11 +39,11 @@ Models/
   DayOfWeek.swift                  Enum: Sun=1..Sat=7, Codable, letter/shortName
   LightSchedule.swift              @Model: SwiftData entity, all schedule fields + smart wake fields
   WatchScheduleSnapshot.swift      Codable mirror of LightSchedule for WCSession transfer
-  SmartWakeMessage.swift           Codable message types + WCMessageKey constants
+  SmartWakeMessage.swift           Codable message types + WCMessageKey constants + HapticPattern enum
 
 Views/
   ScheduleListView.swift           Schedule list, enable toggle, smart wake badge, debug trigger (swipe right)
-  ScheduleDetailView.swift         Schedule editor form, smart wake toggle + window stepper
+  ScheduleDetailView.swift         Schedule editor form, smart wake toggle + window stepper + haptic pattern picker
   DayOfWeekSelector.swift          Circular day-of-week picker
   LightPickerView.swift            HomeKit light multi-select
   ColorPreferenceView.swift        Start/end color pickers + gradient preview
@@ -102,13 +102,14 @@ Assets.xcassets/                   AppIcon, AccentColor
 | lightNames | [String] | Display names (parallel array) |
 | usesSmartWake | Bool | Smart Wake enabled for this schedule |
 | smartWakeWindowMinutes | Int | Smart wake window (default 30) |
+| hapticPatternRaw | String | Haptic pattern for watch alarm ("gentle"/"pulse"/"heartbeat"/"alarm") |
 | lastSmartWakeTriggerAt | Date? | Last smart wake fire time |
 | createdAt | Date | Creation timestamp |
 
 Computed: `activeDays: Set<DayOfWeek>`, `wakeUpTimeString`, `activeDaysSummary`
 
 ### WatchScheduleSnapshot (Codable, Equatable)
-Lightweight mirror of LightSchedule for WCSession transfer. Contains: id, name, wakeUpHour/Minute, activeDaysRaw, leadTimeMinutes, usesSmartWake, smartWakeWindowMinutes, targetBrightness, lightNames. iPhone copy has `init(from: LightSchedule)` extension.
+Lightweight mirror of LightSchedule for WCSession transfer. Contains: id, name, wakeUpHour/Minute, activeDaysRaw, leadTimeMinutes, usesSmartWake, smartWakeWindowMinutes, targetBrightness, lightNames, hapticPatternRaw. iPhone copy has `init(from: LightSchedule)` extension.
 
 ### SmartWakeTriggerPayload (Codable)
 Watch→iPhone trigger: scheduleID, triggerDate, confidence, heartRateAtTrigger?, motionLevel?
@@ -120,9 +121,10 @@ Watch→iPhone state: `.idle`, `.monitoring`, `.triggered`, `.failed` + schedule
 
 ### App Initialization (`Lights_TimerApp.init`)
 ```
+ModelContainer (created manually, shared with SmartWakeCoordinator)
 HomeKitService → LightController → ScheduleEngine
                                         ↓
-WatchConnectivityService ──────→ SmartWakeCoordinator
+WatchConnectivityService ──────→ SmartWakeCoordinator(modelContainer:)
                                         ↓
 HealthKitAuthorizationService    (all injected as @Environment)
 ```
@@ -143,30 +145,43 @@ HealthKitAuthorizationService    (all injected as @Environment)
 
 ### Normal Wake (usesSmartWake == false)
 1. **Background**: `syncBackgroundScenes` creates `HMActionSet` scenes + `HMTimerTrigger` per minute step, named `LT_<shortID>_<step>`. Fires on HomeKit hub regardless of app state.
-2. **Foreground**: `checkForActiveSchedules` detects in-progress window, starts 15-second `Timer.publish` for smooth direct writes via `LightController.applyToMultipleLights`.
+2. **Foreground**: `checkForActiveSchedules` detects in-progress window, starts 15-second `Timer.publish` for smooth direct writes via `LightController.applyToMultipleLights`. Smart wake schedules are **skipped** — they only trigger via the watch.
 3. Progress calculated as `elapsed / total`, brightness and color interpolated linearly.
 
 ### Smart Wake (usesSmartWake == true)
-1. iPhone sends `WatchScheduleSnapshot` array to watch via `WCSession.updateApplicationContext`.
-2. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated` callback, works in background), evaluates next relevant schedule, and starts a `WKExtendedRuntimeSession` (alarm type) to keep the app alive overnight.
-3. When the monitoring window approaches, scheduler starts `HKWorkoutSession` + `HKAnchoredObjectQuery` via `SmartWakeSessionController`.
-4. `WakeHeuristicEngine` builds rolling HR baseline (samples >5min old), scores confidence:
+1. **No gradual ramp**: Smart wake schedules do NOT create per-minute background scenes or trigger foreground timers. Only a single fallback scene (`LT_<shortID>_fallback`) is created at the exact wake time, snapping lights to full brightness if the watch never triggers.
+2. iPhone sends `WatchScheduleSnapshot` array (including `hapticPatternRaw`) to watch via `WCSession.updateApplicationContext`.
+3. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated` callback, works in background), evaluates next relevant schedule, sets `hapticPatternType` on the session controller, and starts a `WKExtendedRuntimeSession` (alarm type) to keep the app alive overnight.
+4. When the monitoring window approaches, scheduler starts `HKWorkoutSession` + `HKAnchoredObjectQuery` via `SmartWakeSessionController`.
+5. `WakeHeuristicEngine` builds rolling HR baseline (samples >5min old), scores confidence:
    - HR rise above baseline: 70% weight (normalized by 5 BPM threshold)
    - Short-term HRV (stddev of last 6 samples): 30% weight (normalized by 5 BPM)
    - Trigger threshold: confidence >= 0.6
    - Cooldown: 5 minutes between attempts
-5. When `shouldTrigger(inWakeWindow: true)` passes, watch sends `SmartWakeTriggerPayload` via `WCSession.sendMessage` (fallback: `transferUserInfo`).
-6. iPhone `SmartWakeCoordinator` validates: schedule exists, enabled, usesSmartWake, within window, not already fired today, engine not already running.
-7. `ScheduleEngine.startSmartWakeExecution(for:triggerTime:)` cleans up background scenes for that schedule, then starts foreground ramp from `triggerTime` to `wakeUpTime` (compressed proportionally).
-8. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. Normal scheduled background scenes also serve as fallback.
+6. When `shouldTrigger(inWakeWindow: true)` passes:
+   - Watch sends `SmartWakeTriggerPayload` via `WCSession.sendMessage` (fallback: `transferUserInfo`).
+   - Watch **simultaneously starts a 60-second haptic ramp** on the wrist using `WKInterfaceDevice.play()` with the configured `HapticPattern` (gentle/pulse/heartbeat/alarm). Tap frequency increases over 60 seconds (CoreHaptics is NOT available on watchOS).
+7. iPhone `SmartWakeCoordinator` validates: schedule exists, enabled, usesSmartWake, within window, not already fired today, engine not already running. Trigger is processed **immediately** using its own `ModelContext` (no longer waits for app to come to foreground).
+8. `ScheduleEngine.startSmartWakeExecution(for:)` cleans up the fallback scene, requests `UIApplication.beginBackgroundTask`, checks `backgroundTimeRemaining`, then performs a rapid 0→100% light ramp using direct HomeKit writes every 5 seconds (up to 60 seconds if in foreground, or whatever background time is available). Final write guarantees lights reach target values.
+9. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time also serves as a last-resort if the watch is completely unavailable.
 
 ### Duplicate Prevention
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
 - `ScheduleEngine.isRunning` guard — no second ramp if one is active.
 - `startSmartWakeExecution` cleans up that schedule's background scenes to prevent brightness conflicts.
+- Watch haptic timer auto-stops after 60s; `stopHaptics()` cancels early if `stopMonitoring()` is called.
+
+### Test Mode
+- **iPhone "Test Lights"** (swipe right on any schedule row): `ScheduleEngine.startTestExecution(for:)` runs the full light ramp from now to now + leadTimeMinutes. A "Stop" button appears in the running banner.
+- **Watch "Test Alarm"** (button per schedule in WatchRootView): plays the 60-second haptic ramp locally AND sends a `testTrigger` message to the phone, which starts a rapid smart-wake-style light ramp (bypasses schedule validation via `SmartWakeCoordinator.handleTestTrigger`).
+- **Haptic preview**: selecting a haptic pattern plays a preview vibration on both platforms (iOS: UIKit feedback generators; watchOS: `WKInterfaceDevice.play()`).
+
+### Haptic Pattern Sync (Watch → Phone)
+- Watch haptic picker changes send `hapticPatternChanged` message via `WatchSessionManager.sendHapticPatternChange`.
+- iPhone `WatchConnectivityService` receives it, calls `SmartWakeCoordinator.handleHapticPatternChange` which updates `LightSchedule.hapticPatternRaw` in SwiftData and re-syncs to watch.
 
 ### Graceful Degradation
-- Watch unavailable → normal scheduled wake runs via background scenes.
+- Watch unavailable → single fallback scene at wake time snaps lights on.
 - HealthKit permissions denied → normal scheduled wake.
 - Watch session dies → normal scheduled wake.
 - Extended runtime session expires/invalidates → `extendedRuntimeSessionWillExpire` force-starts monitoring if pending.
@@ -186,6 +201,8 @@ HealthKitAuthorizationService    (all injected as @Environment)
   - `smartWakeTriggered` → `SmartWakeTriggerPayload`
   - `sessionStateChanged` → `SmartWakeSessionState`
   - `permissionStatus` → `SmartWakePermissionStatus`
+  - `hapticPatternChanged` → `HapticPatternChangePayload` (scheduleID + new pattern)
+  - `testTrigger` → `SmartWakeTriggerPayload` (bypasses validation on phone)
 - All use `[WCMessageKey.type: String, WCMessageKey.payload: Data]` envelope
 
 ## UI Structure

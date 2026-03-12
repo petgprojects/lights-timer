@@ -10,6 +10,8 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
 
     private var session: WCSession?
     var onSmartWakeTrigger: ((SmartWakeTriggerPayload) -> Void)?
+    var onHapticPatternChanged: ((HapticPatternChangePayload) -> Void)?
+    var onTestTrigger: ((SmartWakeTriggerPayload) -> Void)?
 
     override init() {
         super.init()
@@ -112,6 +114,16 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
             watchSessionState = try? decoder.decode(SmartWakeSessionState.self, from: payloadData)
         case WCMessageKey.permissionStatus:
             watchPermissionStatus = try? decoder.decode(SmartWakePermissionStatus.self, from: payloadData)
+        case WCMessageKey.hapticPatternChanged:
+            if let payload = try? decoder.decode(HapticPatternChangePayload.self, from: payloadData) {
+                print("[WatchConnectivity] Received haptic pattern change for \(payload.scheduleID): \(payload.hapticPatternRaw)")
+                onHapticPatternChanged?(payload)
+            }
+        case WCMessageKey.testTrigger:
+            if let trigger = try? decoder.decode(SmartWakeTriggerPayload.self, from: payloadData) {
+                print("[WatchConnectivity] Received test trigger for \(trigger.scheduleID)")
+                onTestTrigger?(trigger)
+            }
         default:
             break
         }

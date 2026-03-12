@@ -24,7 +24,13 @@ final class LightSchedule {
     // Smart Wake
     var usesSmartWake: Bool = false
     var smartWakeWindowMinutes: Int = 30
+    var hapticPatternRaw: String = "gentle"
     var lastSmartWakeTriggerAt: Date?
+
+    var hapticPattern: HapticPattern {
+        get { HapticPattern(rawValue: hapticPatternRaw) ?? .gentle }
+        set { hapticPatternRaw = newValue.rawValue }
+    }
 
     var activeDays: Set<DayOfWeek> {
         get {
@@ -68,7 +74,8 @@ final class LightSchedule {
         lightIdentifiers: [String] = [],
         lightNames: [String] = [],
         usesSmartWake: Bool = false,
-        smartWakeWindowMinutes: Int = 30
+        smartWakeWindowMinutes: Int = 30,
+        hapticPatternRaw: String = "gentle"
     ) {
         self.id = UUID()
         self.name = name
@@ -89,6 +96,7 @@ final class LightSchedule {
         self.createdAt = Date()
         self.usesSmartWake = usesSmartWake
         self.smartWakeWindowMinutes = smartWakeWindowMinutes
+        self.hapticPatternRaw = hapticPatternRaw
         self.lastSmartWakeTriggerAt = nil
     }
 }

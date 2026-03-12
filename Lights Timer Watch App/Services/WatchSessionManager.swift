@@ -66,6 +66,50 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         }
     }
 
+    func sendHapticPatternChange(scheduleID: UUID, pattern: String) {
+        guard let session else { return }
+
+        do {
+            let payload = HapticPatternChangePayload(scheduleID: scheduleID, hapticPatternRaw: pattern)
+            let data = try JSONEncoder().encode(payload)
+            let message: [String: Any] = [
+                WCMessageKey.type: WCMessageKey.hapticPatternChanged,
+                WCMessageKey.payload: data
+            ]
+            if session.isReachable {
+                session.sendMessage(message, replyHandler: nil, errorHandler: { error in
+                    print("[WatchSession] sendMessage (haptic) failed: \(error), using transferUserInfo")
+                    session.transferUserInfo(message)
+                })
+            } else {
+                session.transferUserInfo(message)
+            }
+        } catch {
+            print("[WatchSession] Failed to encode haptic change: \(error)")
+        }
+    }
+
+    func sendTestTrigger(_ payload: SmartWakeTriggerPayload) {
+        guard let session else { return }
+
+        do {
+            let data = try JSONEncoder().encode(payload)
+            let message: [String: Any] = [
+                WCMessageKey.type: WCMessageKey.testTrigger,
+                WCMessageKey.payload: data
+            ]
+            if session.isReachable {
+                session.sendMessage(message, replyHandler: { reply in
+                    print("[WatchSession] Test trigger sent, reply: \(reply)")
+                }, errorHandler: { error in
+                    print("[WatchSession] sendMessage (test) failed: \(error)")
+                })
+            }
+        } catch {
+            print("[WatchSession] Failed to encode test trigger: \(error)")
+        }
+    }
+
     func sendPermissionStatus(authorized: Bool) {
         guard let session else { return }
 

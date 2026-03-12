@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct ScheduleDetailView: View {
     @Environment(\.modelContext) private var modelContext
@@ -25,6 +26,7 @@ struct ScheduleDetailView: View {
     @State private var lightNames: [String] = []
     @State private var usesSmartWake: Bool = false
     @State private var smartWakeWindowMinutes: Int = 30
+    @State private var hapticPattern: HapticPattern = .gentle
     @State private var isSaving: Bool = false
 
     private var isEditing: Bool { scheduleToEdit != nil }
@@ -171,12 +173,33 @@ struct ScheduleDetailView: View {
                     in: 10...60,
                     step: 5
                 )
+
+                Picker(selection: $hapticPattern) {
+                    ForEach(HapticPattern.allCases) { pattern in
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(pattern.displayName)
+                                Text(pattern.patternDescription)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: pattern.systemImage)
+                        }
+                        .tag(pattern)
+                    }
+                } label: {
+                    Label("Haptic Style", systemImage: "waveform")
+                }
+                .onChange(of: hapticPattern) { _, newPattern in
+                    playHapticPreview(for: newPattern)
+                }
             }
         } header: {
             Label("Apple Watch", systemImage: "applewatch")
         } footer: {
             if usesSmartWake {
-                Text("Lights will start at the best moment in the last \(smartWakeWindowMinutes) minutes before wake time, based on Apple Watch sensor data. Falls back to scheduled time if the watch is unavailable.")
+                Text("When the watch detects you're waking up, lights ramp to full brightness in ~1 minute while haptic taps on your wrist escalate to wake you. Falls back to scheduled time if the watch is unavailable.")
             } else {
                 Text("Enable to use Apple Watch sensors to find the ideal wake moment.")
             }
@@ -266,6 +289,24 @@ struct ScheduleDetailView: View {
         lightNames = schedule.lightNames
         usesSmartWake = schedule.usesSmartWake
         smartWakeWindowMinutes = schedule.smartWakeWindowMinutes
+        hapticPattern = schedule.hapticPattern
+    }
+
+    private func playHapticPreview(for pattern: HapticPattern) {
+        switch pattern {
+        case .gentle:
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .pulse:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .heartbeat:
+            let generator = UIImpactFeedbackGenerator(style: .rigid)
+            generator.impactOccurred()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                generator.impactOccurred(intensity: 0.5)
+            }
+        case .alarm:
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        }
     }
 
     private func save() {
@@ -290,6 +331,7 @@ struct ScheduleDetailView: View {
             schedule.lightNames = lightNames
             schedule.usesSmartWake = usesSmartWake
             schedule.smartWakeWindowMinutes = smartWakeWindowMinutes
+            schedule.hapticPatternRaw = hapticPattern.rawValue
         } else {
             let schedule = LightSchedule(
                 name: name,
@@ -307,7 +349,8 @@ struct ScheduleDetailView: View {
                 lightIdentifiers: lightIdentifiers,
                 lightNames: lightNames,
                 usesSmartWake: usesSmartWake,
-                smartWakeWindowMinutes: smartWakeWindowMinutes
+                smartWakeWindowMinutes: smartWakeWindowMinutes,
+                hapticPatternRaw: hapticPattern.rawValue
             )
             modelContext.insert(schedule)
         }

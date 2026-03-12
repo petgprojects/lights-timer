@@ -2,6 +2,7 @@ import Foundation
 import HomeKit
 import SwiftData
 import Combine
+import UIKit
 
 @Observable
 final class ScheduleEngine {
@@ -14,6 +15,7 @@ final class ScheduleEngine {
 
     var isRunning: Bool { activeSchedule != nil }
     var currentProgress: Double = 0
+    private var smartWakeBackgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     // MARK: - Sync State
     private(set) var isSyncing: Bool = false
@@ -56,6 +58,8 @@ final class ScheduleEngine {
 
             for schedule in schedules {
                 guard !schedule.lightIdentifiers.isEmpty else { continue }
+                // Smart wake schedules are triggered by the watch, not the normal timer
+                guard !schedule.usesSmartWake else { continue }
                 guard let wakeUpTime = nextOccurrence(for: schedule) else { continue }
 
                 let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
@@ -166,21 +170,25 @@ final class ScheduleEngine {
         }
     }
 
+    // MARK: - Test Execution
+
+    /// Starts a test run of the full light ramp from now to now + leadTimeMinutes.
+    func startTestExecution(for schedule: LightSchedule) {
+        guard !isRunning else {
+            print("[ScheduleEngine] Already running, ignoring test")
+            return
+        }
+        let startTime = Date()
+        let endTime = startTime.addingTimeInterval(TimeInterval(schedule.leadTimeMinutes * 60))
+        startForegroundExecution(for: schedule, startTime: startTime, endTime: endTime)
+    }
+
     // MARK: - Smart Wake Execution
 
-    /// Starts a smart-wake-triggered ramp from triggerTime to the schedule's wake time.
-    /// The ramp compresses proportionally into the remaining time.
-    func startSmartWakeExecution(for schedule: LightSchedule, triggerTime: Date) async {
-        guard let wakeUpTime = nextOccurrence(for: schedule) else {
-            print("[ScheduleEngine] No next occurrence for smart wake")
-            return
-        }
-
-        guard triggerTime < wakeUpTime else {
-            print("[ScheduleEngine] Smart wake trigger is past wake time, ignoring")
-            return
-        }
-
+    /// Starts a rapid smart-wake ramp from 0% to target brightness.
+    /// Uses available background execution time for a smooth ramp (up to 60 seconds).
+    /// Falls back to setting final values immediately if background time is very short.
+    func startSmartWakeExecution(for schedule: LightSchedule) async {
         guard !isRunning else {
             print("[ScheduleEngine] Already running, ignoring smart wake trigger")
             return
@@ -189,8 +197,97 @@ final class ScheduleEngine {
         // Clean up background scenes for this schedule to prevent conflicts
         await cleanupScenesForSchedule(schedule.id)
 
-        print("[ScheduleEngine] Starting smart wake for '\(schedule.name)' from \(triggerTime) to \(wakeUpTime)")
-        startForegroundExecution(for: schedule, startTime: triggerTime, endTime: wakeUpTime)
+        activeSchedule = schedule
+
+        // Request background execution time
+        smartWakeBackgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "SmartWakeRamp") {
+            UIApplication.shared.endBackgroundTask(self.smartWakeBackgroundTaskID)
+            self.smartWakeBackgroundTaskID = .invalid
+        }
+
+        // Determine ramp duration based on available background time
+        let availableTime = UIApplication.shared.backgroundTimeRemaining
+        let rampDuration: TimeInterval
+        if availableTime > 120 {
+            // App is in foreground (backgroundTimeRemaining returns very large value)
+            rampDuration = 60
+        } else {
+            // In background: use available time with safety buffer
+            rampDuration = max(min(availableTime - 8, 60), 3)
+        }
+
+        let startTime = Date()
+        let endTime = startTime.addingTimeInterval(rampDuration)
+        transitionStartTime = startTime
+        transitionEndTime = endTime
+
+        let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
+        let stepInterval: TimeInterval = 5
+        let stepCount = max(Int(rampDuration / stepInterval), 1)
+
+        print("[ScheduleEngine] Smart wake ramp: \(Int(rampDuration))s, \(stepCount) steps for '\(schedule.name)'")
+
+        for step in 0...stepCount {
+            guard isRunning else { break }
+
+            // Check remaining background time
+            let remaining = UIApplication.shared.backgroundTimeRemaining
+            if remaining < 6 && remaining < 100 {
+                print("[ScheduleEngine] Background time low (\(Int(remaining))s), jumping to final state")
+                break
+            }
+
+            let progress = min(Double(step) / Double(stepCount), 1.0)
+            currentProgress = progress
+
+            let brightness = interpolateBrightness(
+                target: schedule.targetBrightness,
+                progress: progress
+            )
+            let hsb = interpolateHSB(
+                startHue: schedule.startColorHue,
+                startSat: schedule.startColorSaturation,
+                startBri: schedule.startColorBrightness,
+                endHue: schedule.endColorHue,
+                endSat: schedule.endColorSaturation,
+                endBri: schedule.endColorBrightness,
+                progress: progress
+            )
+
+            print("[ScheduleEngine] Smart wake step \(step)/\(stepCount): brightness=\(brightness), progress=\(String(format: "%.0f%%", progress * 100))")
+
+            do {
+                try await lightController.applyToMultipleLights(
+                    brightness: brightness,
+                    hue: hsb.hue * 360.0,
+                    saturation: hsb.saturation * 100.0,
+                    powerOn: true,
+                    identifiers: identifiers
+                )
+            } catch {
+                print("[ScheduleEngine] Smart wake write failed at step \(step): \(error)")
+            }
+
+            if step < stepCount {
+                try? await Task.sleep(for: .seconds(stepInterval))
+            }
+        }
+
+        // Final write to ensure exact target values
+        try? await lightController.applyToMultipleLights(
+            brightness: schedule.targetBrightness,
+            hue: schedule.endColorHue * 360.0,
+            saturation: schedule.endColorSaturation * 100.0,
+            powerOn: true,
+            identifiers: identifiers
+        )
+
+        stopForegroundExecution()
+
+        if smartWakeBackgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(smartWakeBackgroundTaskID)
+            smartWakeBackgroundTaskID = .invalid
+        }
     }
 
     /// Removes background scenes and triggers for a specific schedule.
@@ -251,10 +348,15 @@ final class ScheduleEngine {
             for schedule in schedules {
                 guard !schedule.lightIdentifiers.isEmpty,
                       let wakeUpTime = nextOccurrence(for: schedule) else { continue }
-                let startTime = wakeUpTime.addingTimeInterval(-TimeInterval(schedule.leadTimeMinutes * 60))
-                for step in 1...schedule.leadTimeMinutes {
-                    let fireDate = startTime.addingTimeInterval(Double(step - 1) * 60.0)
-                    if fireDate > now { totalSteps += 1 }
+                if schedule.usesSmartWake {
+                    // Smart wake: single fallback scene at wake time
+                    if wakeUpTime > now { totalSteps += 1 }
+                } else {
+                    let startTime = wakeUpTime.addingTimeInterval(-TimeInterval(schedule.leadTimeMinutes * 60))
+                    for step in 1...schedule.leadTimeMinutes {
+                        let fireDate = startTime.addingTimeInterval(Double(step - 1) * 60.0)
+                        if fireDate > now { totalSteps += 1 }
+                    }
                 }
             }
             syncStepsTotal = totalSteps
@@ -310,14 +412,74 @@ final class ScheduleEngine {
             return
         }
 
+        let shortID = String(schedule.id.uuidString.prefix(8))
+
+        // Smart wake schedules: only create a single fallback scene at wake time.
+        // The watch handles the actual trigger; this is a safety net if the watch is unavailable.
+        if schedule.usesSmartWake {
+            let now = Date()
+            guard wakeUpTime > now else { return }
+
+            let sceneName = "LT_\(shortID)_fallback"
+            print("[ScheduleEngine] Creating fallback scene for smart wake '\(schedule.name)' at \(wakeUpTime)")
+
+            do {
+                let actionSet = try await addActionSet(withName: sceneName, to: home)
+
+                for accessoryID in identifiers {
+                    guard let accessory = home.accessories.first(where: {
+                        $0.uniqueIdentifier == accessoryID
+                    }) else { continue }
+                    guard let service = accessory.services.first(where: {
+                        $0.serviceType == HMServiceTypeLightbulb
+                    }) else { continue }
+
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypePowerState
+                    }) {
+                        let action = HMCharacteristicWriteAction(characteristic: char, targetValue: true as NSNumber)
+                        try await addAction(action, to: actionSet)
+                    }
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypeBrightness
+                    }) {
+                        let action = HMCharacteristicWriteAction(characteristic: char, targetValue: schedule.targetBrightness as NSNumber)
+                        try await addAction(action, to: actionSet)
+                    }
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypeHue
+                    }) {
+                        let action = HMCharacteristicWriteAction(characteristic: char, targetValue: (schedule.endColorHue * 360.0) as NSNumber)
+                        try await addAction(action, to: actionSet)
+                    }
+                    if let char = service.characteristics.first(where: {
+                        $0.characteristicType == HMCharacteristicTypeSaturation
+                    }) {
+                        let action = HMCharacteristicWriteAction(characteristic: char, targetValue: (schedule.endColorSaturation * 100.0) as NSNumber)
+                        try await addAction(action, to: actionSet)
+                    }
+                }
+
+                let trigger = HMTimerTrigger(name: sceneName, fireDate: wakeUpTime, timeZone: .current, recurrence: nil, recurrenceCalendar: nil)
+                try await addTrigger(trigger, to: home)
+                try await addActionSetToTrigger(actionSet, trigger: trigger)
+                try await enableTrigger(trigger)
+                syncStepsCompleted += 1
+            } catch {
+                print("[ScheduleEngine] Failed to create fallback scene \(sceneName): \(error)")
+                syncStepsCompleted += 1
+            }
+
+            print("[ScheduleEngine] Finished creating fallback scene for '\(schedule.name)'")
+            return
+        }
+
+        // Normal schedules: create gradual ramp scenes spaced 1 minute apart
         let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
         let startTime = wakeUpTime.addingTimeInterval(-leadSeconds)
-
-        // Space steps 1 minute apart (minimum reliable interval)
         let stepCount = schedule.leadTimeMinutes
         let now = Date()
 
-        let shortID = String(schedule.id.uuidString.prefix(8))
         print("[ScheduleEngine] Creating \(stepCount) scenes for '\(schedule.name)' starting at \(startTime)")
 
         for step in 1...stepCount {

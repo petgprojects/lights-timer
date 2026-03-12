@@ -26,6 +26,11 @@ struct SmartWakePermissionStatus: Codable {
     let watchConnected: Bool
 }
 
+struct HapticPatternChangePayload: Codable {
+    let scheduleID: UUID
+    let hapticPatternRaw: String
+}
+
 enum WCMessageKey {
     static let type = "type"
     static let payload = "payload"
@@ -34,4 +39,42 @@ enum WCMessageKey {
     static let sessionStateChanged = "sessionStateChanged"
     static let permissionStatus = "permissionStatus"
     static let schedulesUpdated = "schedulesUpdated"
+    static let hapticPatternChanged = "hapticPatternChanged"
+    static let testTrigger = "testTrigger"
+}
+
+enum HapticPattern: String, Codable, CaseIterable, Identifiable {
+    case gentle
+    case pulse
+    case heartbeat
+    case alarm
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .gentle: "Gentle"
+        case .pulse: "Pulse"
+        case .heartbeat: "Heartbeat"
+        case .alarm: "Alarm"
+        }
+    }
+
+    var patternDescription: String {
+        switch self {
+        case .gentle: "Soft taps that gradually increase"
+        case .pulse: "Rhythmic pulses that build"
+        case .heartbeat: "Heartbeat-like double taps"
+        case .alarm: "Strong, urgent tapping"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .gentle: "hand.tap"
+        case .pulse: "waveform.path"
+        case .heartbeat: "heart.fill"
+        case .alarm: "alarm.fill"
+        }
+    }
 }

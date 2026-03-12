@@ -11,6 +11,7 @@ struct WatchScheduleSnapshot: Codable, Identifiable, Equatable {
     let smartWakeWindowMinutes: Int
     let targetBrightness: Int
     let lightNames: [String]
+    var hapticPatternRaw: String
 
     var wakeUpTimeString: String {
         let hour = wakeUpHour % 12 == 0 ? 12 : wakeUpHour % 12

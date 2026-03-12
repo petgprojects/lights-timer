@@ -1,5 +1,8 @@
 import Foundation
 import HealthKit
+#if os(watchOS)
+import WatchKit
+#endif
 
 @Observable
 final class SmartWakeSessionController: NSObject {
@@ -14,6 +17,9 @@ final class SmartWakeSessionController: NSObject {
     /// Set by SmartAlarmScheduler to indicate the extended runtime session is active.
     var isAlarmSessionActive: Bool = false
 
+    /// Set by SmartAlarmScheduler before monitoring starts.
+    var hapticPatternType: HapticPattern = .gentle
+
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
@@ -21,6 +27,11 @@ final class SmartWakeSessionController: NSObject {
 
     private var wakeUpTime: Date?
     private var windowStartTime: Date?
+
+    // Haptic alarm
+    private var hapticTimer: Timer?
+    private var hapticStartTime: Date?
+    private let hapticDuration: TimeInterval = 60
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
@@ -84,6 +95,8 @@ final class SmartWakeSessionController: NSObject {
             healthStore.stop(query)
             heartRateQuery = nil
         }
+
+        stopHaptics()
 
         Task {
             await endWorkoutSession()
@@ -224,6 +237,10 @@ final class SmartWakeSessionController: NSObject {
         )
 
         onTrigger?(payload)
+
+        // Start haptic alarm ramp on the wrist
+        startHapticRamp()
+
         print("[SmartWakeSession] Trigger fired! Confidence: \(confidence)")
     }
 
@@ -235,6 +252,120 @@ final class SmartWakeSessionController: NSObject {
         )
         onStateChange?(state)
     }
+
+    // MARK: - Test Haptics
+
+    /// Starts a test haptic ramp with the given pattern (public, for testing from UI).
+    func startTestHaptics(pattern: HapticPattern) {
+        #if os(watchOS)
+        stopHaptics()
+        hapticPatternType = pattern
+        startHapticRamp()
+        #endif
+    }
+
+    // MARK: - Haptic Alarm (WKInterfaceDevice)
+
+    private func startHapticRamp() {
+        #if os(watchOS)
+        hapticStartTime = Date()
+
+        // Play the first tap immediately
+        playHapticForPattern(hapticPatternType, isSecondBeat: false)
+
+        // Schedule recurring timer at a fast rate; we decide whether to tap each tick
+        hapticTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.hapticTimerTick()
+            }
+        }
+
+        print("[SmartWakeSession] Haptic ramp started: \(hapticPatternType.displayName), 60s via WKInterfaceDevice")
+        #endif
+    }
+
+    private func stopHaptics() {
+        hapticTimer?.invalidate()
+        hapticTimer = nil
+        hapticStartTime = nil
+    }
+
+    #if os(watchOS)
+    /// Tracks elapsed time since last haptic play to implement variable-interval tapping.
+    private var lastHapticPlayTime: Date?
+    /// For heartbeat pattern: tracks whether the next tap is the second (softer) beat.
+    private var heartbeatPendingSecondBeat = false
+
+    private func hapticTimerTick() {
+        guard let startTime = hapticStartTime else { return }
+
+        let elapsed = Date().timeIntervalSince(startTime)
+
+        // Stop after 60 seconds
+        if elapsed >= hapticDuration {
+            // One final strong tap
+            WKInterfaceDevice.current().play(.notification)
+            stopHaptics()
+            return
+        }
+
+        let progress = elapsed / hapticDuration
+        let interval = nextInterval(for: hapticPatternType, progress: progress)
+        let timeSinceLastPlay = lastHapticPlayTime.map { Date().timeIntervalSince($0) } ?? .infinity
+
+        // Handle heartbeat's second beat (fires 0.3s after first beat)
+        if hapticPatternType == .heartbeat && heartbeatPendingSecondBeat && timeSinceLastPlay >= 0.3 {
+            WKInterfaceDevice.current().play(.click)
+            heartbeatPendingSecondBeat = false
+            lastHapticPlayTime = Date()
+            return
+        }
+
+        // Check if enough time has passed for the next tap
+        guard timeSinceLastPlay >= interval else { return }
+
+        playHapticForPattern(hapticPatternType, isSecondBeat: false)
+        lastHapticPlayTime = Date()
+
+        if hapticPatternType == .heartbeat {
+            heartbeatPendingSecondBeat = true
+        }
+    }
+
+    private func playHapticForPattern(_ pattern: HapticPattern, isSecondBeat: Bool) {
+        let device = WKInterfaceDevice.current()
+
+        switch pattern {
+        case .gentle:
+            device.play(.click)
+        case .pulse:
+            device.play(.start)
+        case .heartbeat:
+            device.play(isSecondBeat ? .click : .directionUp)
+        case .alarm:
+            device.play(.notification)
+        }
+    }
+
+    /// Returns the interval between taps based on pattern and progress (0→1).
+    /// Interval decreases over time so taps get more frequent.
+    private func nextInterval(for pattern: HapticPattern, progress: Double) -> TimeInterval {
+        switch pattern {
+        case .gentle:
+            // 5s → 1.5s
+            return 5.0 - 3.5 * progress
+        case .pulse:
+            // 3s → 1s
+            return 3.0 - 2.0 * progress
+        case .heartbeat:
+            // 4s → 1.5s (between heartbeat pairs)
+            return 4.0 - 2.5 * progress
+        case .alarm:
+            // 2s → 0.7s
+            return 2.0 - 1.3 * progress
+        }
+    }
+    #endif
 }
 
 // MARK: - HKWorkoutSessionDelegate

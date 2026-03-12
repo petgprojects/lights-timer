@@ -167,13 +167,16 @@ final class SmartAlarmScheduler: NSObject {
 
         scheduledMonitoringDate = nil
 
+        // Set the haptic pattern before starting monitoring
+        sessionController.hapticPatternType = HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
+
         Task {
             await sessionController.startMonitoring(
                 scheduleID: schedule.id,
                 wakeUpTime: wakeUpTime,
                 windowMinutes: schedule.smartWakeWindowMinutes
             )
-            print("[SmartAlarmScheduler] HR monitoring started for '\(schedule.name)'")
+            print("[SmartAlarmScheduler] HR monitoring started for '\(schedule.name)' with haptic: \(sessionController.hapticPatternType.displayName)")
         }
     }
 
