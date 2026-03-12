@@ -7,6 +7,7 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
     var availableLights: [HMAccessory] = []
     var isAuthorized: Bool = false
     var errorMessage: String?
+    var onHomesUpdated: (() -> Void)?
 
     private let homeManager: HMHomeManager
 
@@ -35,6 +36,7 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
             homes = manager.homes
             isAuthorized = true
             refreshLights()
+            onHomesUpdated?()
         }
     }
 

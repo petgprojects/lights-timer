@@ -27,10 +27,13 @@ struct LightsTimerWatchApp: App {
                     sessionManager.onSchedulesUpdated = { schedules in
                         scheduler.schedulesDidUpdate(schedules)
                     }
+                    sessionManager.onLightHandoff = { payload in
+                        sessionController.handleLightHandoff(payload)
+                    }
                     #endif
 
                     // Request HealthKit authorization
-                    await sessionController.requestAuthorization()
+                    _ = await sessionController.requestAuthorization()
                     sessionManager.sendPermissionStatus(
                         authorized: sessionController.isHealthKitAuthorized
                     )

@@ -10,27 +10,22 @@ final class SmartAlarmScheduler: NSObject {
 
     private var extendedSession: WKExtendedRuntimeSession?
     private var monitoringTimer: Timer?
+    private var pendingSchedule: (schedule: WatchScheduleSnapshot, wakeUpTime: Date, windowStart: Date)?
 
-    /// Tracks which schedule the current session is for, to avoid unnecessary churn.
     private var currentSessionScheduleID: UUID?
     private var currentSessionWakeTime: Date?
 
     private let sessionController: SmartWakeSessionController
     private let sessionManager: WatchSessionManager
 
-    /// How far before the wake window to start the extended session.
-    /// The session itself stays alive; we then start HR monitoring closer to the window.
-    private let sessionLeadTime: TimeInterval = 3600 // 1 hour before wake window
-
-    /// How far before the wake window to start HR monitoring (within the session).
-    private let monitoringLeadTime: TimeInterval = 3600 // 1 hour before wake window
+    private let sessionLeadTime: TimeInterval = 3600
+    private let monitoringLeadTime: TimeInterval = 3600
 
     init(sessionController: SmartWakeSessionController, sessionManager: WatchSessionManager) {
         self.sessionController = sessionController
         self.sessionManager = sessionManager
         super.init()
 
-        // Wire up session controller callbacks
         sessionController.onTrigger = { [weak self] payload in
             self?.sessionManager.sendTrigger(payload)
         }
@@ -41,72 +36,54 @@ final class SmartAlarmScheduler: NSObject {
 
     // MARK: - Schedule Evaluation
 
-    /// Called when schedules are received from the iPhone (can happen in background).
     func schedulesDidUpdate(_ schedules: [WatchScheduleSnapshot]) {
-        let smartWakeSchedules = schedules.filter { $0.usesSmartWake }
+        let smartWakeSchedules = schedules.filter(\.usesSmartWake)
 
         guard let nextSchedule = findNextRelevantSchedule(smartWakeSchedules),
               let wakeUpTime = nextWakeTime(for: nextSchedule) else {
-            // No upcoming smart wake — tear down any active session
             cancelAlarmSession()
+            sessionController.updateNextScheduledWakeWindow(schedule: nil, wakeUpTime: nil)
             return
         }
 
         let windowStart = wakeUpTime.addingTimeInterval(
             -Double(nextSchedule.smartWakeWindowMinutes) * 60
         )
-        let sessionStartTime = windowStart.addingTimeInterval(-sessionLeadTime)
         let now = Date()
 
-        // Already monitoring or scheduled for this exact schedule — skip
-        if sessionController.currentScheduleID == nextSchedule.id,
-           sessionController.sessionState == .monitoring {
+        sessionController.updateNextScheduledWakeWindow(schedule: nextSchedule, wakeUpTime: wakeUpTime)
+
+        if sessionController.isMonitoringActive,
+           sessionController.currentScheduleID == nextSchedule.id {
             return
         }
+
         if currentSessionScheduleID == nextSchedule.id,
            currentSessionWakeTime == wakeUpTime,
-           extendedSession != nil,
-           extendedSession?.state == .running || extendedSession?.state == .scheduled {
-            print("[SmartAlarmScheduler] Session already active for '\(nextSchedule.name)', skipping")
+           let extendedSession,
+           extendedSession.state == .running || extendedSession.state == .scheduled {
+            print("[SmartAlarmScheduler] Session already prepared for '\(nextSchedule.name)', skipping")
             return
         }
 
         if now >= windowStart && now < wakeUpTime {
-            // Already inside the wake window — start monitoring immediately
+            monitoringTimer?.invalidate()
+            monitoringTimer = nil
+            scheduledMonitoringDate = nil
             startMonitoringNow(schedule: nextSchedule, wakeUpTime: wakeUpTime)
-        } else if now >= sessionStartTime && now < windowStart {
-            // Within lead time — start the extended session and schedule monitoring
-            startAlarmSession(schedule: nextSchedule, wakeUpTime: wakeUpTime, windowStart: windowStart)
-        } else if now < sessionStartTime {
-            // Too early — schedule the alarm session for later
-            scheduleAlarmSession(at: sessionStartTime, schedule: nextSchedule, wakeUpTime: wakeUpTime, windowStart: windowStart)
+            return
         }
+
+        let desiredSessionStart = max(windowStart.addingTimeInterval(-sessionLeadTime), now.addingTimeInterval(1))
+        scheduleAlarmSession(
+            at: desiredSessionStart,
+            schedule: nextSchedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: windowStart
+        )
     }
 
     // MARK: - Extended Runtime Session
-
-    private func startAlarmSession(
-        schedule: WatchScheduleSnapshot,
-        wakeUpTime: Date,
-        windowStart: Date
-    ) {
-        cancelAlarmSession()
-
-        let session = WKExtendedRuntimeSession()
-        session.delegate = self
-        self.extendedSession = session
-        currentSessionScheduleID = schedule.id
-        currentSessionWakeTime = wakeUpTime
-        session.start()
-
-        isAlarmSessionActive = true
-        sessionController.isAlarmSessionActive = true
-        alarmSessionError = nil
-        print("[SmartAlarmScheduler] Extended runtime session started")
-
-        // Schedule HR monitoring to begin at the right time
-        scheduleMonitoringStart(schedule: schedule, wakeUpTime: wakeUpTime, windowStart: windowStart)
-    }
 
     private func scheduleAlarmSession(
         at date: Date,
@@ -118,29 +95,27 @@ final class SmartAlarmScheduler: NSObject {
 
         let session = WKExtendedRuntimeSession()
         session.delegate = self
-        self.extendedSession = session
+        extendedSession = session
         currentSessionScheduleID = schedule.id
         currentSessionWakeTime = wakeUpTime
+        pendingSchedule = (schedule, wakeUpTime, windowStart)
         session.start(at: date)
 
-        scheduledMonitoringDate = windowStart
+        let monitoringStart = windowStart.addingTimeInterval(-monitoringLeadTime)
+        scheduledMonitoringDate = max(monitoringStart, date)
         alarmSessionError = nil
-        print("[SmartAlarmScheduler] Alarm session scheduled for \(date)")
-
-        // Store schedule info so we can start monitoring when the session activates
-        pendingSchedule = (schedule, wakeUpTime, windowStart)
+        print("[SmartAlarmScheduler] Alarm session scheduled for \(date) (\(schedule.name))")
     }
-
-    private var pendingSchedule: (schedule: WatchScheduleSnapshot, wakeUpTime: Date, windowStart: Date)?
 
     private func cancelAlarmSession() {
         monitoringTimer?.invalidate()
         monitoringTimer = nil
 
-        if let session = extendedSession,
-           session.state == .running || session.state == .scheduled {
-            session.invalidate()
+        if let extendedSession,
+           extendedSession.state == .running || extendedSession.state == .scheduled {
+            extendedSession.invalidate()
         }
+
         extendedSession = nil
         pendingSchedule = nil
         currentSessionScheduleID = nil
@@ -157,34 +132,36 @@ final class SmartAlarmScheduler: NSObject {
         wakeUpTime: Date,
         windowStart: Date
     ) {
-        let now = Date()
         let monitoringStart = windowStart.addingTimeInterval(-monitoringLeadTime)
+        let now = Date()
 
         if now >= monitoringStart {
-            // Start monitoring immediately
             startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
-        } else {
-            // Schedule a timer to start monitoring later
-            let delay = monitoringStart.timeIntervalSince(now)
-            scheduledMonitoringDate = monitoringStart
-            monitoringTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-                Task { @MainActor in
-                    self?.startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
-                }
-            }
-            print("[SmartAlarmScheduler] HR monitoring scheduled for \(monitoringStart)")
-        }
-    }
-
-    private func startMonitoringNow(schedule: WatchScheduleSnapshot, wakeUpTime: Date) {
-        guard sessionController.sessionState == .idle else {
-            print("[SmartAlarmScheduler] Session controller already active, skipping")
             return
         }
 
+        monitoringTimer?.invalidate()
+        let delay = monitoringStart.timeIntervalSince(now)
+        scheduledMonitoringDate = monitoringStart
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
+            }
+        }
+        print("[SmartAlarmScheduler] HR monitoring scheduled for \(monitoringStart)")
+    }
+
+    private func startMonitoringNow(schedule: WatchScheduleSnapshot, wakeUpTime: Date) {
+        guard !sessionController.isMonitoringActive else {
+            print("[SmartAlarmScheduler] Monitoring already active, skipping")
+            return
+        }
+
+        pendingSchedule = nil
+        monitoringTimer?.invalidate()
+        monitoringTimer = nil
         scheduledMonitoringDate = nil
 
-        // Set the haptic pattern before starting monitoring
         sessionController.hapticPatternType = HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
 
         Task {
@@ -219,7 +196,9 @@ final class SmartAlarmScheduler: NSObject {
 
         for dayOffset in 0..<8 {
             guard let candidateDate = calendar.date(
-                byAdding: .day, value: dayOffset, to: now
+                byAdding: .day,
+                value: dayOffset,
+                to: now
             ) else { continue }
 
             let weekday = calendar.component(.weekday, from: candidateDate)
@@ -233,6 +212,7 @@ final class SmartAlarmScheduler: NSObject {
             guard let wakeUpTime = calendar.date(from: components) else { continue }
             if wakeUpTime > now { return wakeUpTime }
         }
+
         return nil
     }
 }
@@ -248,9 +228,7 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
             self.sessionController.isAlarmSessionActive = true
             print("[SmartAlarmScheduler] Extended runtime session now running")
 
-            // If we had a pending schedule (from a scheduled start), begin monitoring setup
             if let pending = self.pendingSchedule {
-                self.pendingSchedule = nil
                 self.scheduleMonitoringStart(
                     schedule: pending.schedule,
                     wakeUpTime: pending.wakeUpTime,
@@ -265,11 +243,9 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
     ) {
         Task { @MainActor in
             print("[SmartAlarmScheduler] Extended runtime session expiring soon")
-            // If monitoring hasn't started yet but we're close, force-start it
-            if self.sessionController.sessionState == .idle,
+            if !self.sessionController.isMonitoringActive,
                let pending = self.pendingSchedule {
                 self.startMonitoringNow(schedule: pending.schedule, wakeUpTime: pending.wakeUpTime)
-                self.pendingSchedule = nil
             }
         }
     }

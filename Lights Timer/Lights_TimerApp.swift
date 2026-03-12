@@ -25,6 +25,14 @@ struct Lights_TimerApp: App {
             modelContainer: container
         )
 
+        service.onHomesUpdated = { [weak engine] in
+            guard let engine else { return }
+            Task { @MainActor in
+                let context = ModelContext(container)
+                await engine.retryPendingBackgroundSync(modelContext: context)
+            }
+        }
+
         _homeKitService = State(initialValue: service)
         _lightController = State(initialValue: controller)
         _scheduleEngine = State(initialValue: engine)

@@ -14,6 +14,12 @@ final class SmartWakeSessionController: NSObject {
     private(set) var currentScheduleID: UUID?
     private(set) var errorMessage: String?
     private(set) var isHealthKitAuthorized: Bool = false
+    private(set) var isMonitoringActive = false
+
+    private(set) var nextScheduledWakeWindowDescription: String?
+    private(set) var didReceivePhoneHandoffAck = false
+    private(set) var handoffAckStatus = "No recent trigger"
+    private(set) var deferredLocalRampStatus = "Idle"
 
     /// Set by SmartAlarmScheduler to indicate the extended runtime session is active.
     var isAlarmSessionActive: Bool = false
@@ -29,15 +35,23 @@ final class SmartWakeSessionController: NSObject {
     private var heartRateQuery: HKAnchoredObjectQuery?
     private var wakeCheckTimer: Timer?
     private var lightRampTask: Task<Void, Never>?
+    private var deferredLightRampTask: Task<Void, Never>?
 
     private var currentSchedule: WatchScheduleSnapshot?
     private var wakeUpTime: Date?
     private var windowStartTime: Date?
+    private var activeTriggerID: UUID?
+    private var activeTriggerSchedule: WatchScheduleSnapshot?
+    private var activeLocalRampTriggerID: UUID?
 
     // Haptic alarm
     private var hapticTimer: Timer?
     private var hapticStartTime: Date?
+    private var lastHapticPlayTime: Date?
+    private var heartbeatPendingSecondBeat = false
     private let hapticDuration: TimeInterval = 60
+    private let historicalSeedLookback: TimeInterval = 7200
+    private let watchLightHandoffDelay: TimeInterval = 8
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
@@ -71,38 +85,133 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
+    // MARK: - Scheduling Diagnostics
+
+    func updateNextScheduledWakeWindow(schedule: WatchScheduleSnapshot?, wakeUpTime: Date?) {
+        guard let schedule, let wakeUpTime else {
+            nextScheduledWakeWindowDescription = nil
+            return
+        }
+
+        let windowStart = wakeUpTime.addingTimeInterval(-Double(schedule.smartWakeWindowMinutes) * 60)
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        nextScheduledWakeWindowDescription = "\(schedule.name): \(formatter.string(from: windowStart)) - \(formatter.string(from: wakeUpTime))"
+    }
+
     // MARK: - Session Lifecycle
 
     func startMonitoring(
         schedule: WatchScheduleSnapshot,
         wakeUpTime: Date
     ) async {
-        guard sessionState == .idle else { return }
+        guard !isMonitoringActive else { return }
 
-        self.currentSchedule = schedule
-        self.currentScheduleID = schedule.id
-        self.wakeUpTime = wakeUpTime
-        self.windowStartTime = wakeUpTime.addingTimeInterval(
+        let windowStartTime = wakeUpTime.addingTimeInterval(
             -Double(schedule.smartWakeWindowMinutes) * 60
         )
 
-        heuristicEngine.reset()
+        errorMessage = nil
+        currentSchedule = schedule
+        currentScheduleID = schedule.id
+        self.wakeUpTime = wakeUpTime
+        self.windowStartTime = windowStartTime
+        heuristicEngine.configure(wakeWindowStart: windowStartTime)
+
+        isMonitoringActive = true
         sessionState = .monitoring
         notifyStateChange()
 
         do {
+            async let historicalSeed: Void = seedHistoricalHeartRateSamples(
+                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                to: Date()
+            )
+
             try await startWorkoutSession()
-            startHeartRateQuery()
+            startHeartRateQuery(from: Date())
+            try await historicalSeed
             startWakeCheckTimer()
+            checkForWakeTrigger()
             print("[SmartWakeSession] Monitoring started for schedule \(schedule.id)")
         } catch {
-            sessionState = .failed
-            errorMessage = "Failed to start session: \(error.localizedDescription)"
-            notifyStateChange()
+            failMonitoring("Failed to start session: \(error.localizedDescription)")
+        }
+    }
+
+    func finishMonitoringAfterTrigger() {
+        guard isMonitoringActive || sessionState == .triggered else { return }
+
+        tearDownMonitoringSession()
+        currentSchedule = nil
+        currentScheduleID = nil
+        wakeUpTime = nil
+        windowStartTime = nil
+        isMonitoringActive = false
+
+        Task { [weak self] in
+            await self?.endWorkoutSession()
+            await MainActor.run {
+                guard let self else { return }
+                self.sessionState = .idle
+                self.notifyStateChange()
+                print("[SmartWakeSession] Monitoring finished after trigger")
+            }
         }
     }
 
     func stopMonitoring() {
+        tearDownMonitoringSession()
+        stopHaptics()
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = nil
+        lightRampTask?.cancel()
+        lightRampTask = nil
+        activeLocalRampTriggerID = nil
+        activeTriggerID = nil
+        activeTriggerSchedule = nil
+
+        currentSchedule = nil
+        currentScheduleID = nil
+        wakeUpTime = nil
+        windowStartTime = nil
+        isMonitoringActive = false
+        errorMessage = nil
+        sessionState = .idle
+        notifyStateChange()
+
+        Task { [weak self] in
+            await self?.endWorkoutSession()
+        }
+
+        print("[SmartWakeSession] Monitoring stopped")
+    }
+
+    private func failMonitoring(_ message: String) {
+        tearDownMonitoringSession()
+        stopHaptics()
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = nil
+        lightRampTask?.cancel()
+        lightRampTask = nil
+        activeLocalRampTriggerID = nil
+
+        currentSchedule = nil
+        currentScheduleID = nil
+        wakeUpTime = nil
+        windowStartTime = nil
+        isMonitoringActive = false
+        errorMessage = message
+        sessionState = .failed
+        notifyStateChange()
+
+        Task { [weak self] in
+            await self?.endWorkoutSession()
+        }
+    }
+
+    private func tearDownMonitoringSession() {
         wakeCheckTimer?.invalidate()
         wakeCheckTimer = nil
 
@@ -110,22 +219,48 @@ final class SmartWakeSessionController: NSObject {
             healthStore.stop(query)
             heartRateQuery = nil
         }
+    }
 
-        stopHaptics()
-        lightRampTask?.cancel()
-        lightRampTask = nil
+    // MARK: - Handoff
 
-        Task {
-            await endWorkoutSession()
+    func handleLightHandoff(_ payload: SmartWakeLightHandoffPayload) {
+        guard payload.triggerID == activeTriggerID else {
+            print("[SmartWakeSession] Ignoring handoff for stale trigger \(payload.triggerID)")
+            return
         }
 
-        sessionState = .idle
-        currentSchedule = nil
-        currentScheduleID = nil
-        wakeUpTime = nil
-        windowStartTime = nil
-        notifyStateChange()
-        print("[SmartWakeSession] Monitoring stopped")
+        didReceivePhoneHandoffAck = true
+        handoffAckStatus = payload.phoneWillHandleLights
+            ? "Phone accepted lights"
+            : "Phone declined lights\(payload.reason.map { ": \($0)" } ?? "")"
+
+        if payload.phoneWillHandleLights {
+            guard activeLocalRampTriggerID == nil else {
+                deferredLocalRampStatus = "Watch ramp already started before ack"
+                return
+            }
+
+            deferredLightRampTask?.cancel()
+            deferredLightRampTask = nil
+            deferredLocalRampStatus = "Cancelled by phone handoff"
+            print("[SmartWakeSession] Phone accepted light ownership for \(payload.triggerID)")
+            return
+        }
+
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = nil
+
+        guard activeLocalRampTriggerID == nil,
+              let schedule = activeTriggerSchedule else {
+            return
+        }
+
+        deferredLocalRampStatus = "Starting immediately after phone decline"
+        _ = startLocalLightRamp(
+            for: schedule,
+            triggerID: payload.triggerID,
+            reason: "phone declined"
+        )
     }
 
     // MARK: - Workout Session
@@ -145,8 +280,8 @@ final class SmartWakeSessionController: NSObject {
         session.delegate = self
         builder.delegate = self
 
-        self.workoutSession = session
-        self.workoutBuilder = builder
+        workoutSession = session
+        workoutBuilder = builder
 
         session.startActivity(with: Date())
         try await builder.beginCollection(at: Date())
@@ -156,7 +291,7 @@ final class SmartWakeSessionController: NSObject {
         workoutSession?.end()
         if let builder = workoutBuilder {
             try? await builder.endCollection(at: Date())
-            try? await builder.finishWorkout()
+            _ = try? await builder.finishWorkout()
         }
         workoutSession = nil
         workoutBuilder = nil
@@ -164,13 +299,48 @@ final class SmartWakeSessionController: NSObject {
 
     // MARK: - Heart Rate Query
 
-    private func startHeartRateQuery() {
+    private func seedHistoricalHeartRateSamples(from startDate: Date, to endDate: Date) async throws {
+        let samples = try await fetchHistoricalHeartRateSamples(from: startDate, to: endDate)
+        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+        let mappedSamples = samples.map { sample in
+            (date: sample.startDate, bpm: sample.quantity.doubleValue(for: bpmUnit))
+        }
+        heuristicEngine.seedHeartRateSamples(mappedSamples, referenceDate: endDate)
+        checkForWakeTrigger()
+    }
+
+    private func fetchHistoricalHeartRateSamples(
+        from startDate: Date,
+        to endDate: Date
+    ) async throws -> [HKQuantitySample] {
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: HKQuantityType(.heartRate),
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sort]
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    let quantitySamples = (samples as? [HKQuantitySample]) ?? []
+                    continuation.resume(returning: quantitySamples)
+                }
+            }
+
+            healthStore.execute(query)
+        }
+    }
+
+    private func startHeartRateQuery(from startDate: Date) {
         let heartRateType = HKQuantityType(.heartRate)
-        let now = Date()
 
         let query = HKAnchoredObjectQuery(
             type: heartRateType,
-            predicate: HKQuery.predicateForSamples(withStart: now, end: nil),
+            predicate: HKQuery.predicateForSamples(withStart: startDate, end: nil),
             anchor: nil,
             limit: HKObjectQueryNoLimit
         ) { [weak self] _, samples, _, _, _ in
@@ -186,7 +356,7 @@ final class SmartWakeSessionController: NSObject {
     }
 
     nonisolated private func processHeartRateSamples(_ samples: [HKSample]?) {
-        guard let samples = samples as? [HKQuantitySample] else { return }
+        guard let samples = samples as? [HKQuantitySample], !samples.isEmpty else { return }
 
         Task { @MainActor in
             let bpmUnit = HKUnit.count().unitDivided(by: .minute())
@@ -204,64 +374,64 @@ final class SmartWakeSessionController: NSObject {
 
     private func startWakeCheckTimer() {
         wakeCheckTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.checkForWakeTrigger()
             }
         }
     }
 
     private func checkForWakeTrigger() {
-        guard sessionState == .monitoring,
+        guard isMonitoringActive,
               let wakeUpTime,
               let windowStartTime,
-              let scheduleID = currentScheduleID else { return }
+              let schedule = currentSchedule else { return }
 
         let now = Date()
 
-        // Check if we're past the wake time (force stop)
         if now >= wakeUpTime {
-            // Force fire if not already triggered
             if !heuristicEngine.hasTriggered {
-                fireTrigger(scheduleID: scheduleID, confidence: 1.0)
+                fireTrigger(schedule: schedule, confidence: 1.0)
+            } else {
+                finishMonitoringAfterTrigger()
             }
-            stopMonitoring()
             return
         }
 
-        // Check if we're in the wake window
-        let inWindow = now >= windowStartTime
-
-        if heuristicEngine.shouldTrigger(inWakeWindow: inWindow) {
-            fireTrigger(
-                scheduleID: scheduleID,
-                confidence: heuristicEngine.currentConfidence
-            )
+        if heuristicEngine.shouldTrigger(inWakeWindow: now >= windowStartTime, now: now) {
+            fireTrigger(schedule: schedule, confidence: heuristicEngine.currentConfidence)
         }
     }
 
-    private func fireTrigger(scheduleID: UUID, confidence: Double) {
-        heuristicEngine.markTriggered()
+    private func fireTrigger(schedule: WatchScheduleSnapshot, confidence: Double) {
+        let triggerDate = Date()
+        let triggerID = UUID()
+
+        heuristicEngine.markTriggered(at: triggerDate)
+        activeTriggerID = triggerID
+        activeTriggerSchedule = schedule
+        didReceivePhoneHandoffAck = false
+        handoffAckStatus = "Waiting for phone handoff"
+        deferredLocalRampStatus = "Deferred watch ramp armed for +8s"
+
         sessionState = .triggered
         notifyStateChange()
 
-        let latestHR = heuristicEngine.currentConfidence > 0 ? Double(Int(confidence * 100)) : nil
-        let lightsHandledOnWatch = currentSchedule.map(startLocalLightRamp(for:)) == true
+        startHapticRamp()
+        scheduleDeferredLocalLightRamp(for: schedule, triggerID: triggerID)
 
         let payload = SmartWakeTriggerPayload(
-            scheduleID: scheduleID,
-            triggerDate: Date(),
+            triggerID: triggerID,
+            scheduleID: schedule.id,
+            triggerDate: triggerDate,
             confidence: confidence,
-            heartRateAtTrigger: latestHR,
-            motionLevel: nil,
-            lightsHandledOnWatch: lightsHandledOnWatch ? true : nil
+            heartRateAtTrigger: heuristicEngine.latestHeartRate,
+            motionLevel: nil
         )
 
         onTrigger?(payload)
+        finishMonitoringAfterTrigger()
 
-        // Start haptic alarm ramp on the wrist
-        startHapticRamp()
-
-        print("[SmartWakeSession] Trigger fired! Confidence: \(confidence)")
+        print("[SmartWakeSession] Trigger fired \(triggerID) with confidence \(confidence)")
     }
 
     private func notifyStateChange() {
@@ -275,7 +445,6 @@ final class SmartWakeSessionController: NSObject {
 
     // MARK: - Test Haptics
 
-    /// Starts a test haptic ramp with the given pattern (public, for testing from UI).
     func startTestHaptics(pattern: HapticPattern) {
         #if os(watchOS)
         stopHaptics()
@@ -286,29 +455,63 @@ final class SmartWakeSessionController: NSObject {
 
     @discardableResult
     func startTestLights(for schedule: WatchScheduleSnapshot) -> Bool {
-        startLocalLightRamp(for: schedule)
+        startLocalLightRamp(for: schedule, triggerID: nil, reason: "manual test")
     }
 
     // MARK: - HomeKit Lights
 
+    private func scheduleDeferredLocalLightRamp(for schedule: WatchScheduleSnapshot, triggerID: UUID) {
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(self?.watchLightHandoffDelay ?? 8))
+
+            await MainActor.run {
+                guard let self,
+                      self.activeTriggerID == triggerID,
+                      self.activeLocalRampTriggerID == nil else { return }
+
+                self.deferredLocalRampStatus = "Watch ramp started after 8s timeout"
+                _ = self.startLocalLightRamp(
+                    for: schedule,
+                    triggerID: triggerID,
+                    reason: "handoff timeout"
+                )
+                self.deferredLightRampTask = nil
+            }
+        }
+    }
+
     @discardableResult
-    private func startLocalLightRamp(for schedule: WatchScheduleSnapshot) -> Bool {
+    private func startLocalLightRamp(
+        for schedule: WatchScheduleSnapshot,
+        triggerID: UUID?,
+        reason: String
+    ) -> Bool {
         let identifiers = schedule.lightIdentifiers.compactMap(UUID.init(uuidString:))
         guard !identifiers.isEmpty else {
+            deferredLocalRampStatus = "No light identifiers for watch fallback"
             print("[SmartWakeSession] No light identifiers available for '\(schedule.name)'")
             return false
         }
 
+        activeLocalRampTriggerID = triggerID
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = nil
         lightRampTask?.cancel()
         lightRampTask = Task { [weak self] in
-            await self?.runLocalLightRamp(for: schedule, identifiers: identifiers)
+            await self?.runLocalLightRamp(
+                for: schedule,
+                identifiers: identifiers,
+                reason: reason
+            )
         }
         return true
     }
 
     private func runLocalLightRamp(
         for schedule: WatchScheduleSnapshot,
-        identifiers: [UUID]
+        identifiers: [UUID],
+        reason: String
     ) async {
         await homeKitService.waitForReady()
 
@@ -316,7 +519,8 @@ final class SmartWakeSessionController: NSObject {
         let stepInterval: TimeInterval = 5
         let stepCount = max(Int(rampDuration / stepInterval), 1)
 
-        print("[SmartWakeSession] Starting watch HomeKit ramp for '\(schedule.name)'")
+        deferredLocalRampStatus = "Watch ramp running (\(reason))"
+        print("[SmartWakeSession] Starting watch HomeKit ramp for '\(schedule.name)' (\(reason))")
 
         for step in 0...stepCount {
             if Task.isCancelled { return }
@@ -374,14 +578,16 @@ final class SmartWakeSessionController: NSObject {
 
     private func startHapticRamp() {
         #if os(watchOS)
+        stopHaptics()
         hapticStartTime = Date()
+        lastHapticPlayTime = nil
+        heartbeatPendingSecondBeat = false
 
-        // Play the first tap immediately
         playHapticForPattern(hapticPatternType, isSecondBeat: false)
+        lastHapticPlayTime = Date()
 
-        // Schedule recurring timer at a fast rate; we decide whether to tap each tick
         hapticTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.hapticTimerTick()
             }
         }
@@ -394,22 +600,16 @@ final class SmartWakeSessionController: NSObject {
         hapticTimer?.invalidate()
         hapticTimer = nil
         hapticStartTime = nil
+        lastHapticPlayTime = nil
+        heartbeatPendingSecondBeat = false
     }
 
     #if os(watchOS)
-    /// Tracks elapsed time since last haptic play to implement variable-interval tapping.
-    private var lastHapticPlayTime: Date?
-    /// For heartbeat pattern: tracks whether the next tap is the second (softer) beat.
-    private var heartbeatPendingSecondBeat = false
-
     private func hapticTimerTick() {
         guard let startTime = hapticStartTime else { return }
 
         let elapsed = Date().timeIntervalSince(startTime)
-
-        // Stop after 60 seconds
         if elapsed >= hapticDuration {
-            // One final strong tap
             WKInterfaceDevice.current().play(.notification)
             stopHaptics()
             return
@@ -419,7 +619,6 @@ final class SmartWakeSessionController: NSObject {
         let interval = nextInterval(for: hapticPatternType, progress: progress)
         let timeSinceLastPlay = lastHapticPlayTime.map { Date().timeIntervalSince($0) } ?? .infinity
 
-        // Handle heartbeat's second beat (fires 0.3s after first beat)
         if hapticPatternType == .heartbeat && heartbeatPendingSecondBeat && timeSinceLastPlay >= 0.3 {
             WKInterfaceDevice.current().play(.click)
             heartbeatPendingSecondBeat = false
@@ -427,7 +626,6 @@ final class SmartWakeSessionController: NSObject {
             return
         }
 
-        // Check if enough time has passed for the next tap
         guard timeSinceLastPlay >= interval else { return }
 
         playHapticForPattern(hapticPatternType, isSecondBeat: false)
@@ -453,21 +651,15 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
-    /// Returns the interval between taps based on pattern and progress (0→1).
-    /// Interval decreases over time so taps get more frequent.
     private func nextInterval(for pattern: HapticPattern, progress: Double) -> TimeInterval {
         switch pattern {
         case .gentle:
-            // 5s → 1.5s
             return 5.0 - 3.5 * progress
         case .pulse:
-            // 3s → 1s
             return 3.0 - 2.0 * progress
         case .heartbeat:
-            // 4s → 1.5s (between heartbeat pairs)
             return 4.0 - 2.5 * progress
         case .alarm:
-            // 2s → 0.7s
             return 2.0 - 1.3 * progress
         }
     }
@@ -484,12 +676,8 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
         date: Date
     ) {
         Task { @MainActor in
-            if toState == .ended {
-                if self.sessionState == .monitoring {
-                    self.sessionState = .failed
-                    self.errorMessage = "Workout session ended unexpectedly"
-                    self.notifyStateChange()
-                }
+            if toState == .ended, self.isMonitoringActive {
+                self.failMonitoring("Workout session ended unexpectedly")
             }
         }
     }
@@ -499,9 +687,7 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
         didFailWithError error: Error
     ) {
         Task { @MainActor in
-            self.sessionState = .failed
-            self.errorMessage = error.localizedDescription
-            self.notifyStateChange()
+            self.failMonitoring(error.localizedDescription)
         }
     }
 }
@@ -515,7 +701,7 @@ extension SmartWakeSessionController: HKLiveWorkoutBuilderDelegate {
         _ workoutBuilder: HKLiveWorkoutBuilder,
         didCollectDataOf collectedTypes: Set<HKSampleType>
     ) {
-        // Heart rate data is handled by the anchored query
+        // Heart rate data is handled by the anchored query.
     }
 }
 

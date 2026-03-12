@@ -1,6 +1,7 @@
 import Foundation
 
-struct SmartWakeTriggerPayload: Codable {
+struct SmartWakeTriggerPayload: Codable, Equatable {
+    let triggerID: UUID
     let scheduleID: UUID
     let triggerDate: Date
     let confidence: Double
@@ -9,6 +10,7 @@ struct SmartWakeTriggerPayload: Codable {
     let lightsHandledOnWatch: Bool?
 
     init(
+        triggerID: UUID = UUID(),
         scheduleID: UUID,
         triggerDate: Date,
         confidence: Double,
@@ -16,6 +18,7 @@ struct SmartWakeTriggerPayload: Codable {
         motionLevel: Double?,
         lightsHandledOnWatch: Bool? = nil
     ) {
+        self.triggerID = triggerID
         self.scheduleID = scheduleID
         self.triggerDate = triggerDate
         self.confidence = confidence
@@ -23,6 +26,13 @@ struct SmartWakeTriggerPayload: Codable {
         self.motionLevel = motionLevel
         self.lightsHandledOnWatch = lightsHandledOnWatch
     }
+}
+
+struct SmartWakeLightHandoffPayload: Codable, Equatable {
+    let triggerID: UUID
+    let scheduleID: UUID
+    let phoneWillHandleLights: Bool
+    let reason: String?
 }
 
 struct SmartWakeSessionState: Codable {
@@ -58,6 +68,7 @@ enum WCMessageKey {
     static let schedulesUpdated = "schedulesUpdated"
     static let hapticPatternChanged = "hapticPatternChanged"
     static let testTrigger = "testTrigger"
+    static let smartWakeLightHandoff = "smartWakeLightHandoff"
 }
 
 enum HapticPattern: String, Codable, CaseIterable, Identifiable {

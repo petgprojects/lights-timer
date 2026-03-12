@@ -104,6 +104,42 @@ struct WatchRootView: View {
                     .monospacedDigit()
             }
 
+            #if DEBUG
+            if let nextWindow = sessionController.nextScheduledWakeWindowDescription {
+                LabeledContent("Next Window") {
+                    Text(nextWindow)
+                        .font(.caption2)
+                }
+            }
+
+            LabeledContent("Baseline Ready") {
+                Text(sessionController.heuristicEngine.baselineReady ? "Yes" : "No")
+                    .font(.caption2)
+            }
+
+            LabeledContent("Baseline BPM") {
+                Text(sessionController.heuristicEngine.baselineHeartRate.map { String(format: "%.0f", $0) } ?? "--")
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Baseline Samples") {
+                Text("\(sessionController.heuristicEngine.baselineSampleCount)")
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Phone Ack") {
+                Text(sessionController.didReceivePhoneHandoffAck ? sessionController.handoffAckStatus : "Waiting/none")
+                    .font(.caption2)
+            }
+
+            LabeledContent("Watch Fallback") {
+                Text(sessionController.deferredLocalRampStatus)
+                    .font(.caption2)
+            }
+            #endif
+
             HStack {
                 Text("Phone")
                     .font(.caption)

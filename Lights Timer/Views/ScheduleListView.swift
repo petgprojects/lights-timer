@@ -120,23 +120,41 @@ struct ScheduleListView: View {
             .onDelete(perform: deleteSchedules)
 
             #if DEBUG
-            if let result = smartWakeCoordinator.lastTriggerResult {
-                Section("Smart Wake Debug") {
-                    Text(result)
+            Section("Smart Wake Debug") {
+                LabeledContent("Last Trigger") {
+                    Text(smartWakeCoordinator.lastTriggerResult ?? "None")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
 
-                    HStack {
-                        Text("Watch")
-                            .font(.caption)
-                        Spacer()
-                        Image(systemName: watchConnectivity.isWatchReachable ? "checkmark.circle.fill" : "xmark.circle")
-                            .foregroundStyle(watchConnectivity.isWatchReachable ? .green : .red)
-                            .imageScale(.small)
-                        Text(watchConnectivity.isWatchAppInstalled ? "Installed" : "Not installed")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                LabeledContent("Light Owner") {
+                    Text(smartWakeCoordinator.lastLightRampOwner ?? "None")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("Last Scene Sync") {
+                    Text(backgroundSyncStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("HomeKit Retry") {
+                    Text(scheduleEngine.hasPendingHomeKitRetry ? "Pending" : "Clear")
+                        .font(.caption)
+                        .foregroundStyle(scheduleEngine.hasPendingHomeKitRetry ? .orange : .secondary)
+                }
+
+                HStack {
+                    Text("Watch")
+                        .font(.caption)
+                    Spacer()
+                    Image(systemName: watchConnectivity.isWatchReachable ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(watchConnectivity.isWatchReachable ? .green : .red)
+                        .imageScale(.small)
+                    Text(watchConnectivity.isWatchAppInstalled ? "Installed" : "Not installed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             #endif
@@ -214,6 +232,27 @@ struct ScheduleListView: View {
         }
         smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
     }
+
+    #if DEBUG
+    private var backgroundSyncStatus: String {
+        if let error = scheduleEngine.lastBackgroundSyncError {
+            return error
+        }
+        if let success = scheduleEngine.lastBackgroundSyncSucceededAt {
+            return "Succeeded at \(formatDebugTime(success))"
+        }
+        if let attempt = scheduleEngine.lastBackgroundSyncAttemptAt {
+            return "Attempted at \(formatDebugTime(attempt))"
+        }
+        return "Not attempted"
+    }
+
+    private func formatDebugTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+    #endif
 }
 
 #Preview {

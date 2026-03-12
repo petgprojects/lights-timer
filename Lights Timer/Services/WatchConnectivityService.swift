@@ -9,6 +9,8 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     var watchPermissionStatus: SmartWakePermissionStatus?
 
     private var session: WCSession?
+    private var cachedSchedulesContext: [String: Any]?
+
     var onSmartWakeTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onHapticPatternChanged: ((HapticPatternChangePayload) -> Void)?
     var onTestTrigger: ((SmartWakeTriggerPayload) -> Void)?
@@ -26,16 +28,54 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     // MARK: - Send to Watch
 
     func sendSchedules(_ snapshots: [WatchScheduleSnapshot]) {
-        guard let session, session.activationState == .activated else { return }
-
         do {
             let data = try JSONEncoder().encode(snapshots)
-            let context: [String: Any] = [
+            cachedSchedulesContext = [
                 WCMessageKey.type: WCMessageKey.schedulesUpdated,
                 WCMessageKey.payload: data
             ]
+            flushCachedSchedulesContext()
+        } catch {
+            print("[WatchConnectivity] Failed to encode schedules: \(error)")
+        }
+    }
+
+    func sendLightHandoff(_ payload: SmartWakeLightHandoffPayload) {
+        guard let session else { return }
+
+        do {
+            let data = try JSONEncoder().encode(payload)
+            let message: [String: Any] = [
+                WCMessageKey.type: WCMessageKey.smartWakeLightHandoff,
+                WCMessageKey.payload: data
+            ]
+
+            if session.isReachable {
+                session.sendMessage(message, replyHandler: nil) { error in
+                    print("[WatchConnectivity] Failed to send handoff for \(payload.triggerID): \(error)")
+                }
+            } else {
+                session.transferUserInfo(message)
+                print("[WatchConnectivity] Watch not reachable, queued handoff for \(payload.triggerID)")
+            }
+        } catch {
+            print("[WatchConnectivity] Failed to encode handoff: \(error)")
+        }
+    }
+
+    private func flushCachedSchedulesContext() {
+        guard let session,
+              session.activationState == .activated,
+              let context = cachedSchedulesContext else { return }
+
+        do {
             try session.updateApplicationContext(context)
-            print("[WatchConnectivity] Sent \(snapshots.count) schedule(s) to watch")
+            if let data = context[WCMessageKey.payload] as? Data,
+               let schedules = try? JSONDecoder().decode([WatchScheduleSnapshot].self, from: data) {
+                print("[WatchConnectivity] Sent \(schedules.count) schedule(s) to watch")
+            } else {
+                print("[WatchConnectivity] Sent schedules to watch")
+            }
         } catch {
             print("[WatchConnectivity] Failed to send schedules: \(error)")
         }
@@ -51,6 +91,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
         Task { @MainActor in
             self.isWatchAppInstalled = session.isWatchAppInstalled
             self.isWatchReachable = session.isReachable
+            self.flushCachedSchedulesContext()
         }
     }
 
@@ -64,6 +105,14 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
         Task { @MainActor in
             self.isWatchAppInstalled = session.isWatchAppInstalled
             self.isWatchReachable = session.isReachable
+            self.flushCachedSchedulesContext()
+        }
+    }
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        Task { @MainActor in
+            self.isWatchReachable = session.isReachable
+            self.flushCachedSchedulesContext()
         }
     }
 
@@ -107,7 +156,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
         switch type {
         case WCMessageKey.smartWakeTriggered:
             if let trigger = try? decoder.decode(SmartWakeTriggerPayload.self, from: payloadData) {
-                print("[WatchConnectivity] Received smart wake trigger for \(trigger.scheduleID)")
+                print("[WatchConnectivity] Received smart wake trigger \(trigger.triggerID) for \(trigger.scheduleID)")
                 onSmartWakeTrigger?(trigger)
             }
         case WCMessageKey.sessionStateChanged:
@@ -121,7 +170,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
             }
         case WCMessageKey.testTrigger:
             if let trigger = try? decoder.decode(SmartWakeTriggerPayload.self, from: payloadData) {
-                print("[WatchConnectivity] Received test trigger for \(trigger.scheduleID)")
+                print("[WatchConnectivity] Received test trigger \(trigger.triggerID) for \(trigger.scheduleID)")
                 onTestTrigger?(trigger)
             }
         default:

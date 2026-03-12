@@ -6,9 +6,13 @@ final class SmartWakeCoordinator {
     private let scheduleEngine: ScheduleEngine
     private let watchConnectivity: WatchConnectivityService
     private let modelContainer: ModelContainer
+
     private var firedToday: [UUID: Date] = [:]
+    private var processedHandoffs: [UUID: SmartWakeLightHandoffPayload] = [:]
+    private var pendingTrigger: SmartWakeTriggerPayload?
 
     var lastTriggerResult: String?
+    var lastLightRampOwner: String?
 
     init(scheduleEngine: ScheduleEngine, watchConnectivity: WatchConnectivityService, modelContainer: ModelContainer) {
         self.scheduleEngine = scheduleEngine
@@ -37,30 +41,28 @@ final class SmartWakeCoordinator {
 
     // MARK: - Trigger Handling
 
-    /// Validates and processes a smart wake trigger from the watch.
-    /// Processes immediately using its own ModelContext for background execution.
-    private var pendingTrigger: SmartWakeTriggerPayload?
-
     func handleTrigger(_ trigger: SmartWakeTriggerPayload) async {
-        print("[SmartWakeCoordinator] Trigger received for schedule \(trigger.scheduleID), confidence: \(trigger.confidence)")
+        print("[SmartWakeCoordinator] Trigger received \(trigger.triggerID) for schedule \(trigger.scheduleID), confidence: \(trigger.confidence)")
 
-        // Wait for HomeKit to discover homes (may take a few seconds when woken in background)
-        await scheduleEngine.homeKitService.waitForReady()
+        if let existingHandoff = processedHandoffs[trigger.triggerID] {
+            watchConnectivity.sendLightHandoff(existingHandoff)
+            lastTriggerResult = "Duplicate trigger ignored"
+            lastLightRampOwner = existingHandoff.phoneWillHandleLights ? "Phone" : "Watch"
+            return
+        }
 
         let context = ModelContext(modelContainer)
         let processed = await processValidatedTrigger(trigger, modelContext: context)
         if !processed {
-            // Store as pending for fallback processing when app comes to foreground
             pendingTrigger = trigger
         }
     }
 
-    /// Fallback: called from SwiftUI context when app becomes active.
     func processPendingTrigger(modelContext: ModelContext) async {
         guard let trigger = pendingTrigger else { return }
         pendingTrigger = nil
 
-        let _ = await processValidatedTrigger(trigger, modelContext: modelContext)
+        _ = await processValidatedTrigger(trigger, modelContext: modelContext)
     }
 
     @discardableResult
@@ -68,84 +70,147 @@ final class SmartWakeCoordinator {
         _ trigger: SmartWakeTriggerPayload,
         modelContext: ModelContext
     ) async -> Bool {
-        let scheduleID = trigger.scheduleID
-        let triggerDate = trigger.triggerDate
-
-        // 1. Find matching schedule
         do {
-            let descriptor = FetchDescriptor<LightSchedule>(
-                predicate: #Predicate { $0.isEnabled }
-            )
+            let descriptor = FetchDescriptor<LightSchedule>()
             let schedules = try modelContext.fetch(descriptor)
-            guard let schedule = schedules.first(where: { $0.id == scheduleID }) else {
-                lastTriggerResult = "Schedule not found"
-                print("[SmartWakeCoordinator] No matching schedule for \(scheduleID)")
-                return false
-            }
 
-            // 2. Validate smart wake is enabled
-            guard schedule.usesSmartWake else {
-                lastTriggerResult = "Smart wake not enabled"
-                return false
-            }
-
-            // 3. Find next wake time
-            guard let wakeUpTime = scheduleEngine.nextOccurrence(for: schedule) else {
-                lastTriggerResult = "No upcoming occurrence"
-                return false
-            }
-
-            // 4. Check trigger is within the smart wake window
-            let windowStart = wakeUpTime.addingTimeInterval(
-                -Double(schedule.smartWakeWindowMinutes) * 60
-            )
-            guard triggerDate >= windowStart && triggerDate < wakeUpTime else {
-                lastTriggerResult = "Outside wake window"
-                print("[SmartWakeCoordinator] Trigger at \(triggerDate) outside window \(windowStart)...\(wakeUpTime)")
-                return false
-            }
-
-            // 5. Check not already fired today
-            if let lastFired = firedToday[scheduleID] {
-                let calendar = Calendar.current
-                if calendar.isDate(lastFired, inSameDayAs: triggerDate) {
-                    lastTriggerResult = "Already fired today"
-                    return false
-                }
-            }
-
-            if trigger.lightsHandledOnWatch == true {
-                firedToday[scheduleID] = triggerDate
-                schedule.lastSmartWakeTriggerAt = triggerDate
-                try? modelContext.save()
-
-                lastTriggerResult = "Smart wake started on watch at \(formatTime(triggerDate))"
-                print("[SmartWakeCoordinator] Watch handled smart wake lights for '\(schedule.name)'")
+            guard let schedule = schedules.first(where: { $0.id == trigger.scheduleID }) else {
+                rejectTrigger(trigger, scheduleID: trigger.scheduleID, reason: "Schedule not found")
                 return true
             }
 
-            // 6. Don't start if engine is already running
-            guard !scheduleEngine.isRunning else {
-                lastTriggerResult = "Ramp already running"
-                return false
+            guard schedule.isEnabled else {
+                rejectTrigger(trigger, scheduleID: schedule.id, reason: "Schedule disabled")
+                return true
             }
 
-            // 7. Start the ramp
-            firedToday[scheduleID] = triggerDate
-            schedule.lastSmartWakeTriggerAt = triggerDate
+            guard schedule.usesSmartWake else {
+                rejectTrigger(trigger, scheduleID: schedule.id, reason: "Smart wake not enabled")
+                return true
+            }
+
+            guard let occurrence = occurrenceContainingTriggerDate(trigger.triggerDate, for: schedule) else {
+                rejectTrigger(trigger, scheduleID: schedule.id, reason: "Outside wake window")
+                return true
+            }
+
+            if let firedOccurrence = firedToday[schedule.id],
+               Calendar.current.isDate(firedOccurrence, inSameDayAs: occurrence.wakeUpTime) {
+                rejectTrigger(trigger, scheduleID: schedule.id, reason: "Already fired for this wake")
+                return true
+            }
+
+            firedToday[schedule.id] = occurrence.wakeUpTime
+            schedule.lastSmartWakeTriggerAt = trigger.triggerDate
             try? modelContext.save()
 
-            await scheduleEngine.startSmartWakeExecution(for: schedule)
+            guard !scheduleEngine.isRunning else {
+                acceptWatchFallback(trigger, scheduleID: schedule.id, reason: "Phone ramp already running")
+                return true
+            }
 
-            lastTriggerResult = "Smart wake started at \(formatTime(triggerDate))"
-            print("[SmartWakeCoordinator] Smart wake ramp started for '\(schedule.name)'")
+            let phoneWillHandleLights = await scheduleEngine.startSmartWakeExecution(for: schedule)
+            if phoneWillHandleLights {
+                sendHandoff(
+                    triggerID: trigger.triggerID,
+                    scheduleID: schedule.id,
+                    phoneWillHandleLights: true,
+                    reason: nil
+                )
+                lastTriggerResult = "Phone accepted smart wake at \(formatTime(trigger.triggerDate))"
+                lastLightRampOwner = "Phone"
+            } else {
+                acceptWatchFallback(trigger, scheduleID: schedule.id, reason: "Phone could not start smart wake execution")
+            }
+
             return true
-
         } catch {
-            lastTriggerResult = "Error: \(error.localizedDescription)"
-            print("[SmartWakeCoordinator] Error processing trigger: \(error)")
-            return false
+            rejectTrigger(trigger, scheduleID: trigger.scheduleID, reason: "Error: \(error.localizedDescription)")
+            return true
         }
+    }
+
+    private func rejectTrigger(
+        _ trigger: SmartWakeTriggerPayload,
+        scheduleID: UUID,
+        reason: String
+    ) {
+        sendHandoff(
+            triggerID: trigger.triggerID,
+            scheduleID: scheduleID,
+            phoneWillHandleLights: false,
+            reason: reason
+        )
+        lastTriggerResult = reason
+        lastLightRampOwner = "Rejected"
+        print("[SmartWakeCoordinator] Rejected trigger \(trigger.triggerID): \(reason)")
+    }
+
+    private func acceptWatchFallback(
+        _ trigger: SmartWakeTriggerPayload,
+        scheduleID: UUID,
+        reason: String
+    ) {
+        sendHandoff(
+            triggerID: trigger.triggerID,
+            scheduleID: scheduleID,
+            phoneWillHandleLights: false,
+            reason: reason
+        )
+        lastTriggerResult = "Watch fallback at \(formatTime(trigger.triggerDate)): \(reason)"
+        lastLightRampOwner = "Watch"
+        print("[SmartWakeCoordinator] Watch fallback for trigger \(trigger.triggerID): \(reason)")
+    }
+
+    private func sendHandoff(
+        triggerID: UUID,
+        scheduleID: UUID,
+        phoneWillHandleLights: Bool,
+        reason: String?
+    ) {
+        let payload = SmartWakeLightHandoffPayload(
+            triggerID: triggerID,
+            scheduleID: scheduleID,
+            phoneWillHandleLights: phoneWillHandleLights,
+            reason: reason
+        )
+        processedHandoffs[triggerID] = payload
+        watchConnectivity.sendLightHandoff(payload)
+    }
+
+    private func occurrenceContainingTriggerDate(
+        _ triggerDate: Date,
+        for schedule: LightSchedule
+    ) -> (wakeUpTime: Date, windowStart: Date)? {
+        let calendar = Calendar.current
+        let baseDay = calendar.startOfDay(for: triggerDate)
+        let offsets = [0, -1, 1]
+
+        for offset in offsets {
+            guard let candidateDay = calendar.date(byAdding: .day, value: offset, to: baseDay) else {
+                continue
+            }
+
+            let weekday = calendar.component(.weekday, from: candidateDay)
+            guard let dayOfWeek = DayOfWeek(rawValue: weekday),
+                  schedule.activeDays.contains(dayOfWeek) else { continue }
+
+            var components = calendar.dateComponents([.year, .month, .day], from: candidateDay)
+            components.hour = schedule.wakeUpHour
+            components.minute = schedule.wakeUpMinute
+            components.second = 0
+
+            guard let wakeUpTime = calendar.date(from: components) else { continue }
+            let windowStart = wakeUpTime.addingTimeInterval(
+                -Double(schedule.smartWakeWindowMinutes) * 60
+            )
+
+            if triggerDate >= windowStart && triggerDate < wakeUpTime {
+                return (wakeUpTime, windowStart)
+            }
+        }
+
+        return nil
     }
 
     // MARK: - Haptic Pattern Change (from Watch)
@@ -159,10 +224,10 @@ final class SmartWakeCoordinator {
                 print("[SmartWakeCoordinator] Schedule not found for haptic change")
                 return
             }
+
             schedule.hapticPatternRaw = payload.hapticPatternRaw
             try context.save()
             print("[SmartWakeCoordinator] Updated haptic pattern to '\(payload.hapticPatternRaw)' for '\(schedule.name)'")
-            // Re-sync to watch so it gets the confirmed update
             syncSchedulesToWatch(modelContext: context)
         } catch {
             print("[SmartWakeCoordinator] Failed to update haptic pattern: \(error)")
@@ -171,41 +236,46 @@ final class SmartWakeCoordinator {
 
     // MARK: - Test Trigger (from Watch)
 
-    /// Handles a test trigger from the watch — bypasses schedule validation.
     private func handleTestTrigger(_ trigger: SmartWakeTriggerPayload) async {
-        // Wait for HomeKit to discover homes (may take a few seconds when woken in background)
-        await scheduleEngine.homeKitService.waitForReady()
-
         let context = ModelContext(modelContainer)
+
         do {
             let descriptor = FetchDescriptor<LightSchedule>()
             let schedules = try context.fetch(descriptor)
             guard let schedule = schedules.first(where: { $0.id == trigger.scheduleID }) else {
                 lastTriggerResult = "Test: schedule not found"
+                lastLightRampOwner = "Rejected"
                 return
             }
+
             guard !scheduleEngine.isRunning else {
                 lastTriggerResult = "Test: ramp already running"
+                lastLightRampOwner = "Rejected"
                 return
             }
 
             if trigger.lightsHandledOnWatch == true {
                 lastTriggerResult = "Test ramp started on watch for '\(schedule.name)'"
-                print("[SmartWakeCoordinator] Watch handled test ramp for '\(schedule.name)'")
+                lastLightRampOwner = "Watch (test)"
                 return
             }
 
-            await scheduleEngine.startSmartWakeExecution(for: schedule)
-            lastTriggerResult = "Test ramp started for '\(schedule.name)'"
-            print("[SmartWakeCoordinator] Test ramp started for '\(schedule.name)'")
+            let started = await scheduleEngine.startSmartWakeExecution(for: schedule)
+            if started {
+                lastTriggerResult = "Test ramp started on phone for '\(schedule.name)'"
+                lastLightRampOwner = "Phone (test)"
+            } else {
+                lastTriggerResult = "Test phone ramp failed, watch should handle if available"
+                lastLightRampOwner = "Watch (test fallback)"
+            }
         } catch {
             lastTriggerResult = "Test error: \(error.localizedDescription)"
+            lastLightRampOwner = "Rejected"
         }
     }
 
     // MARK: - Schedule Sync
 
-    /// Sends current smart-wake-enabled schedules to the watch.
     func syncSchedulesToWatch(modelContext: ModelContext) {
         do {
             let descriptor = FetchDescriptor<LightSchedule>(
@@ -213,7 +283,7 @@ final class SmartWakeCoordinator {
             )
             let schedules = try modelContext.fetch(descriptor)
             let snapshots = schedules
-                .filter { $0.usesSmartWake }
+                .filter(\.usesSmartWake)
                 .map { WatchScheduleSnapshot(from: $0) }
             watchConnectivity.sendSchedules(snapshots)
         } catch {
@@ -221,7 +291,6 @@ final class SmartWakeCoordinator {
         }
     }
 
-    /// Simulate a smart wake trigger for testing.
     func simulateTrigger(for schedule: LightSchedule) async {
         let trigger = SmartWakeTriggerPayload(
             scheduleID: schedule.id,
@@ -239,8 +308,8 @@ final class SmartWakeCoordinator {
     func resetDailyState() {
         let calendar = Calendar.current
         let today = Date()
-        firedToday = firedToday.filter { _, date in
-            calendar.isDate(date, inSameDayAs: today)
+        firedToday = firedToday.filter { _, occurrenceDate in
+            calendar.isDate(occurrenceDate, inSameDayAs: today)
         }
     }
 

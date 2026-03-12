@@ -9,6 +9,7 @@ final class ScheduleEngine {
     let homeKitService: HomeKitService
     private let lightController: LightController
     private var timerCancellable: AnyCancellable?
+    private var smartWakeTask: Task<Void, Never>?
     private(set) var activeSchedule: LightSchedule?
     private var transitionStartTime: Date?
     private var transitionEndTime: Date?
@@ -21,6 +22,10 @@ final class ScheduleEngine {
     private(set) var isSyncing: Bool = false
     private(set) var syncStepsCompleted: Int = 0
     private(set) var syncStepsTotal: Int = 0
+    private(set) var lastBackgroundSyncAttemptAt: Date?
+    private(set) var lastBackgroundSyncSucceededAt: Date?
+    private(set) var lastBackgroundSyncError: String?
+    private(set) var hasPendingHomeKitRetry: Bool = false
 
     init(homeKitService: HomeKitService, lightController: LightController) {
         self.homeKitService = homeKitService
@@ -37,6 +42,12 @@ final class ScheduleEngine {
         await checkForActiveSchedules(modelContext: modelContext)
 
         // 2. Set up background triggers (scenes) for future schedules
+        await homeKitService.waitForReady()
+        await syncBackgroundScenes(modelContext: modelContext)
+    }
+
+    func retryPendingBackgroundSync(modelContext: ModelContext) async {
+        guard hasPendingHomeKitRetry, !homeKitService.homes.isEmpty else { return }
         await syncBackgroundScenes(modelContext: modelContext)
     }
 
@@ -107,10 +118,16 @@ final class ScheduleEngine {
     func stopForegroundExecution() {
         timerCancellable?.cancel()
         timerCancellable = nil
+        smartWakeTask?.cancel()
+        smartWakeTask = nil
         activeSchedule = nil
         transitionStartTime = nil
         transitionEndTime = nil
         currentProgress = 0
+        if smartWakeBackgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(smartWakeBackgroundTaskID)
+            smartWakeBackgroundTaskID = .invalid
+        }
         print("[ScheduleEngine] Stopped foreground execution")
     }
 
@@ -190,10 +207,22 @@ final class ScheduleEngine {
     /// Starts a rapid smart-wake ramp from 0% to target brightness.
     /// Uses available background execution time for a smooth ramp (up to 60 seconds).
     /// Falls back to setting final values immediately if background time is very short.
-    func startSmartWakeExecution(for schedule: LightSchedule) async {
+    func startSmartWakeExecution(for schedule: LightSchedule) async -> Bool {
         guard !isRunning else {
             print("[ScheduleEngine] Already running, ignoring smart wake trigger")
-            return
+            return false
+        }
+
+        await homeKitService.waitForReady(timeout: 6)
+        guard !homeKitService.homes.isEmpty else {
+            print("[ScheduleEngine] HomeKit homes unavailable, cannot start smart wake")
+            return false
+        }
+
+        let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
+        guard !identifiers.isEmpty else {
+            print("[ScheduleEngine] No light identifiers, cannot start smart wake")
+            return false
         }
 
         activeSchedule = schedule
@@ -223,16 +252,31 @@ final class ScheduleEngine {
         transitionStartTime = startTime
         transitionEndTime = endTime
 
-        let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
+        smartWakeTask = Task { [weak self] in
+            await self?.runSmartWakeExecution(
+                for: schedule,
+                identifiers: identifiers,
+                rampDuration: rampDuration,
+                shouldRemoveFallbackScene: shouldRemoveFallbackScene
+            )
+        }
+        return true
+    }
+
+    private func runSmartWakeExecution(
+        for schedule: LightSchedule,
+        identifiers: [UUID],
+        rampDuration: TimeInterval,
+        shouldRemoveFallbackScene: Bool
+    ) async {
         let stepInterval: TimeInterval = 5
         let stepCount = max(Int(rampDuration / stepInterval), 1)
 
         print("[ScheduleEngine] Smart wake ramp: \(Int(rampDuration))s, \(stepCount) steps for '\(schedule.name)'")
 
         for step in 0...stepCount {
-            guard isRunning else { break }
+            guard !Task.isCancelled, isRunning else { break }
 
-            // Check remaining background time
             let remaining = UIApplication.shared.backgroundTimeRemaining
             if remaining < 6 && remaining < 100 {
                 print("[ScheduleEngine] Background time low (\(Int(remaining))s), jumping to final state")
@@ -276,26 +320,22 @@ final class ScheduleEngine {
             }
         }
 
-        // Final write to ensure exact target values
-        try? await lightController.applyToMultipleLights(
-            brightness: schedule.targetBrightness,
-            hue: schedule.endColorHue * 360.0,
-            saturation: schedule.endColorSaturation * 100.0,
-            powerOn: true,
-            skipColor: schedule.skipColorWrites,
-            identifiers: identifiers
-        )
+        if !Task.isCancelled {
+            try? await lightController.applyToMultipleLights(
+                brightness: schedule.targetBrightness,
+                hue: schedule.endColorHue * 360.0,
+                saturation: schedule.endColorSaturation * 100.0,
+                powerOn: true,
+                skipColor: schedule.skipColorWrites,
+                identifiers: identifiers
+            )
 
-        if shouldRemoveFallbackScene {
-            await cleanupScenesForSchedule(schedule.id)
+            if shouldRemoveFallbackScene {
+                await cleanupScenesForSchedule(schedule.id)
+            }
         }
 
         stopForegroundExecution()
-
-        if smartWakeBackgroundTaskID != .invalid {
-            UIApplication.shared.endBackgroundTask(smartWakeBackgroundTaskID)
-            smartWakeBackgroundTaskID = .invalid
-        }
     }
 
     /// Removes background scenes and triggers for a specific schedule.
@@ -321,7 +361,11 @@ final class ScheduleEngine {
     /// Each scene sets all target lights to a specific brightness/color step.
     /// Scenes are spaced 1 minute apart (the minimum reliable interval per the user).
     func syncBackgroundScenes(modelContext: ModelContext) async {
+        lastBackgroundSyncAttemptAt = Date()
+
         guard !homeKitService.homes.isEmpty else {
+            hasPendingHomeKitRetry = true
+            lastBackgroundSyncError = "Waiting for HomeKit homes"
             print("[ScheduleEngine] No HomeKit homes available, skipping scene sync")
             return
         }
@@ -342,6 +386,7 @@ final class ScheduleEngine {
         }
 
         do {
+            hasPendingHomeKitRetry = false
             // Clean up old scenes and triggers we previously created
             await cleanupOldScenesAndTriggers()
 
@@ -372,7 +417,11 @@ final class ScheduleEngine {
             for schedule in schedules {
                 await createScenesForSchedule(schedule)
             }
+
+            lastBackgroundSyncSucceededAt = Date()
+            lastBackgroundSyncError = nil
         } catch {
+            lastBackgroundSyncError = error.localizedDescription
             print("[ScheduleEngine] Failed to sync scenes: \(error)")
         }
     }
