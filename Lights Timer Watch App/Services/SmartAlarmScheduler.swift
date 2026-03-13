@@ -17,13 +17,19 @@ final class SmartAlarmScheduler: NSObject {
 
     private let sessionController: SmartWakeSessionController
     private let sessionManager: WatchSessionManager
+    private let logStore: SmartWakeLogStore
 
     private let sessionLeadTime: TimeInterval = 3600
     private let monitoringLeadTime: TimeInterval = 3600
 
-    init(sessionController: SmartWakeSessionController, sessionManager: WatchSessionManager) {
+    init(
+        sessionController: SmartWakeSessionController,
+        sessionManager: WatchSessionManager,
+        logStore: SmartWakeLogStore
+    ) {
         self.sessionController = sessionController
         self.sessionManager = sessionManager
+        self.logStore = logStore
         super.init()
 
         sessionController.onTrigger = { [weak self] payload in
@@ -41,6 +47,7 @@ final class SmartAlarmScheduler: NSObject {
 
         guard let nextSchedule = findNextRelevantSchedule(smartWakeSchedules),
               let wakeUpTime = nextWakeTime(for: nextSchedule) else {
+            logStore.log("SCHEDULER", "No upcoming smart wake schedules found", level: .warning)
             cancelAlarmSession()
             sessionController.updateNextScheduledWakeWindow(schedule: nil, wakeUpTime: nil)
             return
@@ -50,11 +57,25 @@ final class SmartAlarmScheduler: NSObject {
             -Double(nextSchedule.smartWakeWindowMinutes) * 60
         )
         let now = Date()
+        logStore.prepareSessionLog(
+            schedule: nextSchedule,
+            wakeUpTime: wakeUpTime,
+            wakeWindowStart: windowStart,
+            reason: "scheduler evaluation"
+        )
+        logStore.log(
+            "SCHEDULER",
+            "Evaluating next schedule '\(nextSchedule.name)' now=\(formatTimestamp(now)) wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStart))"
+        )
 
         sessionController.updateNextScheduledWakeWindow(schedule: nextSchedule, wakeUpTime: wakeUpTime)
 
         if sessionController.isMonitoringActive,
            sessionController.currentScheduleID == nextSchedule.id {
+            logStore.log(
+                "SCHEDULER",
+                "Monitoring already active for '\(nextSchedule.name)'; skipping re-schedule"
+            )
             return
         }
 
@@ -62,11 +83,18 @@ final class SmartAlarmScheduler: NSObject {
            currentSessionWakeTime == wakeUpTime,
            let extendedSession,
            extendedSession.state == .running || extendedSession.state == .scheduled {
-            print("[SmartAlarmScheduler] Session already prepared for '\(nextSchedule.name)', skipping")
+            logStore.log(
+                "SCHEDULER",
+                "Extended runtime session already prepared for '\(nextSchedule.name)'; skipping duplicate scheduling"
+            )
             return
         }
 
         if now >= windowStart && now < wakeUpTime {
+            logStore.log(
+                "SCHEDULER",
+                "Already inside the wake window for '\(nextSchedule.name)'; starting monitoring immediately"
+            )
             monitoringTimer?.invalidate()
             monitoringTimer = nil
             scheduledMonitoringDate = nil
@@ -104,7 +132,10 @@ final class SmartAlarmScheduler: NSObject {
         let monitoringStart = windowStart.addingTimeInterval(-monitoringLeadTime)
         scheduledMonitoringDate = max(monitoringStart, date)
         alarmSessionError = nil
-        print("[SmartAlarmScheduler] Alarm session scheduled for \(date) (\(schedule.name))")
+        logStore.log(
+            "SCHEDULER",
+            "Scheduled extended runtime session for '\(schedule.name)' at \(formatTimestamp(date)). monitoringStart=\(formatTimestamp(scheduledMonitoringDate))"
+        )
     }
 
     private func cancelAlarmSession() {
@@ -122,6 +153,7 @@ final class SmartAlarmScheduler: NSObject {
         isAlarmSessionActive = false
         sessionController.isAlarmSessionActive = false
         scheduledMonitoringDate = nil
+        logStore.log("SCHEDULER", "Cancelled any pending extended runtime session")
     }
 
     // MARK: - HR Monitoring Start
@@ -135,6 +167,10 @@ final class SmartAlarmScheduler: NSObject {
         let now = Date()
 
         if now >= monitoringStart {
+            logStore.log(
+                "SCHEDULER",
+                "Monitoring lead time already started for '\(schedule.name)'; beginning monitoring immediately"
+            )
             startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
             return
         }
@@ -147,12 +183,19 @@ final class SmartAlarmScheduler: NSObject {
                 self?.startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
             }
         }
-        print("[SmartAlarmScheduler] HR monitoring scheduled for \(monitoringStart)")
+        logStore.log(
+            "SCHEDULER",
+            "Scheduled HR monitoring start for '\(schedule.name)' at \(formatTimestamp(monitoringStart))"
+        )
     }
 
     private func startMonitoringNow(schedule: WatchScheduleSnapshot, wakeUpTime: Date) {
         guard !sessionController.isMonitoringActive else {
-            print("[SmartAlarmScheduler] Monitoring already active, skipping")
+            logStore.log(
+                "SCHEDULER",
+                "startMonitoringNow ignored because monitoring is already active",
+                level: .warning
+            )
             return
         }
 
@@ -168,9 +211,24 @@ final class SmartAlarmScheduler: NSObject {
                 schedule: schedule,
                 wakeUpTime: wakeUpTime
             )
-            print("[SmartAlarmScheduler] HR monitoring started for '\(schedule.name)' with haptic: \(sessionController.hapticPatternType.displayName)")
+            logStore.log(
+                "SCHEDULER",
+                "HR monitoring started for '\(schedule.name)' with haptic=\(sessionController.hapticPatternType.displayName)"
+            )
         }
     }
+
+    private func formatTimestamp(_ date: Date?) -> String {
+        guard let date else { return "--" }
+        return Self.timestampFormatter.string(from: date)
+    }
+
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
+        formatter.timeZone = .current
+        return formatter
+    }()
 
     // MARK: - Schedule Helpers
 
@@ -225,7 +283,7 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
         Task { @MainActor in
             self.isAlarmSessionActive = true
             self.sessionController.isAlarmSessionActive = true
-            print("[SmartAlarmScheduler] Extended runtime session now running")
+            self.logStore.log("SCHEDULER", "Extended runtime session is now running")
 
             if let pending = self.pendingSchedule {
                 self.scheduleMonitoringStart(
@@ -241,7 +299,11 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
         _ extendedRuntimeSession: WKExtendedRuntimeSession
     ) {
         Task { @MainActor in
-            print("[SmartAlarmScheduler] Extended runtime session expiring soon")
+            self.logStore.log(
+                "SCHEDULER",
+                "Extended runtime session will expire soon",
+                level: .warning
+            )
             if !self.sessionController.isMonitoringActive,
                let pending = self.pendingSchedule {
                 self.startMonitoringNow(schedule: pending.schedule, wakeUpTime: pending.wakeUpTime)
@@ -261,9 +323,17 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
 
             if let error {
                 self.alarmSessionError = error.localizedDescription
-                print("[SmartAlarmScheduler] Session invalidated with error: \(error)")
+                self.logStore.log(
+                    "SCHEDULER",
+                    "Extended runtime session invalidated with error: \(error.localizedDescription)",
+                    level: .error
+                )
             } else {
-                print("[SmartAlarmScheduler] Session invalidated, reason: \(reason.rawValue)")
+                self.logStore.log(
+                    "SCHEDULER",
+                    "Extended runtime session invalidated. reason=\(reason.rawValue)",
+                    level: .warning
+                )
             }
         }
     }

@@ -4,6 +4,7 @@ import WatchKit
 #endif
 
 struct WatchRootView: View {
+    @Environment(SmartWakeLogStore.self) private var logStore
     @Environment(WatchSessionManager.self) private var sessionManager
     @Environment(SmartWakeSessionController.self) private var sessionController
 
@@ -14,6 +15,7 @@ struct WatchRootView: View {
                 statusSection
                 schedulesSection(schedules: $sm.activeSchedules)
                 diagnosticsSection
+                logsSection
             }
             .navigationTitle("Lights Timer")
         }
@@ -195,6 +197,43 @@ struct WatchRootView: View {
         }
     }
 
+    private var logsSection: some View {
+        Section("Logs") {
+            NavigationLink("Open Watch Logs") {
+                WatchLogArchiveView()
+            }
+
+            if let latestLog = logStore.latestLog {
+                ShareLink(item: latestLog.url) {
+                    Label("Share Latest Log", systemImage: "square.and.arrow.up")
+                }
+
+                Button {
+                    sessionManager.transferLogFile(latestLog.url)
+                } label: {
+                    Label("Send Latest Log To iPhone", systemImage: "iphone")
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(latestLog.displayName)
+                        .font(.caption2)
+                    Text("\(formatLogDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("No watch logs yet")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            LabeledContent("iPhone Export") {
+                Text(logStore.lastTransferStatus)
+                    .font(.caption2)
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func playWatchHapticPreview(for pattern: HapticPattern) {
@@ -276,5 +315,12 @@ struct WatchRootView: View {
     private var nextScheduleDescription: String? {
         guard let schedule = sessionManager.activeSchedules.first else { return nil }
         return "\(schedule.name) at \(schedule.wakeUpTimeString)"
+    }
+
+    private func formatLogDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 }

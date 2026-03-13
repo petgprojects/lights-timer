@@ -2,16 +2,28 @@ import SwiftUI
 
 @main
 struct LightsTimerWatchApp: App {
-    @State private var sessionManager = WatchSessionManager()
-    @State private var sessionController = SmartWakeSessionController()
+    @State private var logStore: SmartWakeLogStore
+    @State private var sessionManager: WatchSessionManager
+    @State private var sessionController: SmartWakeSessionController
 
     #if os(watchOS)
     @State private var alarmScheduler: SmartAlarmScheduler?
     #endif
 
+    init() {
+        let logStore = SmartWakeLogStore()
+        let sessionManager = WatchSessionManager(logStore: logStore)
+        let sessionController = SmartWakeSessionController(logStore: logStore)
+
+        _logStore = State(initialValue: logStore)
+        _sessionManager = State(initialValue: sessionManager)
+        _sessionController = State(initialValue: sessionController)
+    }
+
     var body: some Scene {
         WindowGroup {
             WatchRootView()
+                .environment(logStore)
                 .environment(sessionManager)
                 .environment(sessionController)
                 .task {
@@ -19,7 +31,8 @@ struct LightsTimerWatchApp: App {
                     // Create the scheduler and wire it up
                     let scheduler = SmartAlarmScheduler(
                         sessionController: sessionController,
-                        sessionManager: sessionManager
+                        sessionManager: sessionManager,
+                        logStore: logStore
                     )
                     alarmScheduler = scheduler
 
@@ -30,12 +43,19 @@ struct LightsTimerWatchApp: App {
                     sessionManager.onLightHandoff = { payload in
                         sessionController.handleLightHandoff(payload)
                     }
+                    sessionController.onLogReadyToTransfer = { url in
+                        sessionManager.transferLogFile(url)
+                    }
                     #endif
 
                     // Request HealthKit authorization
                     _ = await sessionController.requestAuthorization()
                     sessionManager.sendPermissionStatus(
                         authorized: sessionController.isHealthKitAuthorized
+                    )
+                    logStore.log(
+                        "APP",
+                        "Watch app task initialized. HealthKit authorized=\(sessionController.isHealthKitAuthorized)"
                     )
 
                     #if os(watchOS)

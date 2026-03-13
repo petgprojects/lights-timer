@@ -15,6 +15,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     var onSmartWakeTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onHapticPatternChanged: ((HapticPatternChangePayload) -> Void)?
     var onTestTrigger: ((SmartWakeTriggerPayload) -> Void)?
+    var onWatchLogFileReceived: ((URL, [String: Any]?) -> Void)?
 
     override init() {
         super.init()
@@ -145,6 +146,15 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     ) {
         Task { @MainActor in
             self.handleMessage(userInfo)
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didReceive file: WCSessionFile
+    ) {
+        Task { @MainActor in
+            self.onWatchLogFileReceived?(file.fileURL, file.metadata)
         }
     }
 

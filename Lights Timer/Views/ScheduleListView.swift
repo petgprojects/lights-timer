@@ -6,6 +6,7 @@ struct ScheduleListView: View {
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
     @Environment(WatchConnectivityService.self) private var watchConnectivity
+    @Environment(WatchLogArchiveService.self) private var watchLogArchive
     @Query(sort: \LightSchedule.createdAt) private var schedules: [LightSchedule]
     @State private var showingNewSchedule = false
 
@@ -47,6 +48,12 @@ struct ScheduleListView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.orange)
+
+            NavigationLink {
+                WatchLogArchiveView()
+            } label: {
+                Text("Watch Logs")
+            }
         }
     }
 
@@ -118,6 +125,37 @@ struct ScheduleListView: View {
                 }
             }
             .onDelete(perform: deleteSchedules)
+
+            Section("Watch Logs") {
+                NavigationLink {
+                    WatchLogArchiveView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Imported Watch Logs")
+                        Text(watchLogArchive.lastImportStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let latestLog = watchLogArchive.latestLog {
+                    ShareLink(item: latestLog.url) {
+                        Label("Share Latest Log", systemImage: "square.and.arrow.up")
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(latestLog.displayName)
+                            .font(.caption)
+                        Text("\(formatWatchLogDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("No watch log has been imported yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             #if DEBUG
             Section("Smart Wake Debug") {
@@ -233,6 +271,13 @@ struct ScheduleListView: View {
         smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
     }
 
+    private func formatWatchLogDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
     #if DEBUG
     private var backgroundSyncStatus: String {
         if let error = scheduleEngine.lastBackgroundSyncError {
@@ -271,4 +316,5 @@ struct ScheduleListView: View {
     .environment(engine)
     .environment(SmartWakeCoordinator(scheduleEngine: engine, watchConnectivity: connectivity, modelContainer: container))
     .environment(connectivity)
+    .environment(WatchLogArchiveService())
 }

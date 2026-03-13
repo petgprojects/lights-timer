@@ -10,6 +10,7 @@ struct Lights_TimerApp: App {
     @State private var watchConnectivity = WatchConnectivityService()
     @State private var smartWakeCoordinator: SmartWakeCoordinator
     @State private var healthKitAuth = HealthKitAuthorizationService()
+    @State private var watchLogArchive: WatchLogArchiveService
 
     init() {
         let container = try! ModelContainer(for: LightSchedule.self)
@@ -19,6 +20,7 @@ struct Lights_TimerApp: App {
         let controller = LightController(homeKitService: service)
         let engine = ScheduleEngine(homeKitService: service, lightController: controller)
         let connectivity = WatchConnectivityService()
+        let watchLogArchive = WatchLogArchiveService()
         let coordinator = SmartWakeCoordinator(
             scheduleEngine: engine,
             watchConnectivity: connectivity,
@@ -38,6 +40,11 @@ struct Lights_TimerApp: App {
         _scheduleEngine = State(initialValue: engine)
         _watchConnectivity = State(initialValue: connectivity)
         _smartWakeCoordinator = State(initialValue: coordinator)
+        _watchLogArchive = State(initialValue: watchLogArchive)
+
+        connectivity.onWatchLogFileReceived = { [weak watchLogArchive] fileURL, metadata in
+            watchLogArchive?.importTransferredLog(from: fileURL, metadata: metadata)
+        }
     }
 
     var body: some Scene {
@@ -48,6 +55,7 @@ struct Lights_TimerApp: App {
                 .environment(watchConnectivity)
                 .environment(smartWakeCoordinator)
                 .environment(healthKitAuth)
+                .environment(watchLogArchive)
         }
         .modelContainer(modelContainer)
     }

@@ -1,0 +1,267 @@
+import Foundation
+
+struct SmartWakeLogFile: Identifiable, Hashable {
+    let id: String
+    let fileName: String
+    let url: URL
+    let createdAt: Date
+    let modifiedAt: Date
+    let sizeInBytes: Int64
+
+    var displayName: String {
+        fileName.replacingOccurrences(of: ".log", with: "")
+    }
+
+    var sizeDescription: String {
+        ByteCountFormatter.string(fromByteCount: sizeInBytes, countStyle: .file)
+    }
+}
+
+enum SmartWakeLogLevel: String {
+    case info = "INFO"
+    case warning = "WARN"
+    case error = "ERROR"
+}
+
+@Observable
+final class SmartWakeLogStore {
+    private(set) var availableLogs: [SmartWakeLogFile] = []
+    private(set) var activeLogFile: SmartWakeLogFile?
+    private(set) var lastTransferStatus = "No log transfer yet"
+
+    private let fileManager = FileManager.default
+    private let logsDirectoryURL: URL
+    private let retainedLogLimit = 14
+
+    private var activeSessionKey: String?
+
+    private let logTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
+        formatter.timeZone = .current
+        return formatter
+    }()
+
+    private let fileTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyyMMdd-HHmmssZ"
+        return formatter
+    }()
+
+    init() {
+        let appSupportURL = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        logsDirectoryURL = appSupportURL.appendingPathComponent("SmartWakeLogs", isDirectory: true)
+
+        ensureLogsDirectory()
+        refreshAvailableLogs()
+    }
+
+    var latestLog: SmartWakeLogFile? {
+        availableLogs.first
+    }
+
+    func prepareSessionLog(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        wakeWindowStart: Date,
+        reason: String
+    ) {
+        let sessionKey = makeSessionKey(scheduleID: schedule.id, wakeUpTime: wakeUpTime)
+        let logURL = logsDirectoryURL.appendingPathComponent(
+            makeFileName(schedule: schedule, wakeUpTime: wakeUpTime)
+        )
+        let isNewFile = !fileManager.fileExists(atPath: logURL.path)
+
+        activeSessionKey = sessionKey
+        if isNewFile {
+            let header = [
+                "# Lights Timer Watch Smart Wake Log",
+                "Created: \(formatTimestamp(Date()))",
+                "Schedule: \(schedule.name) (\(schedule.id.uuidString))",
+                "Wake Time: \(formatTimestamp(wakeUpTime))",
+                "Wake Window Start: \(formatTimestamp(wakeWindowStart))",
+                "Lead Time Minutes: \(schedule.leadTimeMinutes)",
+                "Smart Wake Window Minutes: \(schedule.smartWakeWindowMinutes)",
+                "Target Brightness: \(schedule.targetBrightness)",
+                "Skip Color Writes: \(schedule.skipColorWrites)",
+                ""
+            ].joined(separator: "\n")
+            write(header, to: logURL, append: false)
+        }
+
+        writeLog(
+            category: "SESSION",
+            message: "Prepared session log (\(reason)) for '\(schedule.name)' wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(wakeWindowStart))",
+            level: .info,
+            logURL: logURL
+        )
+        refreshAvailableLogs(selecting: logURL)
+        pruneLogsIfNeeded(excluding: logURL)
+    }
+
+    func log(_ category: String, _ message: String, level: SmartWakeLogLevel = .info) {
+        guard let logURL = activeLogFile?.url else { return }
+        writeLog(category: category, message: message, level: level, logURL: logURL)
+        refreshAvailableLogs(selecting: logURL)
+    }
+
+    func latestLogContents() -> String {
+        guard let latestLog else { return "No logs recorded yet." }
+        return logContents(for: latestLog)
+    }
+
+    func logContents(for file: SmartWakeLogFile) -> String {
+        (try? String(contentsOf: file.url, encoding: .utf8))
+            ?? "Unable to read \(file.fileName)."
+    }
+
+    func refreshAvailableLogs() {
+        refreshAvailableLogs(selecting: activeLogFile?.url)
+    }
+
+    func noteQueuedTransfer(for fileURL: URL) {
+        lastTransferStatus = "Queued \(fileURL.lastPathComponent) for iPhone transfer"
+    }
+
+    func noteCompletedTransfer(for fileName: String) {
+        lastTransferStatus = "Transferred \(fileName) to iPhone"
+    }
+
+    func noteFailedTransfer(for fileName: String, error: String) {
+        lastTransferStatus = "Failed to transfer \(fileName): \(error)"
+    }
+
+    private func refreshAvailableLogs(selecting selectedURL: URL?) {
+        ensureLogsDirectory()
+
+        let logURLs = (try? fileManager.contentsOfDirectory(
+            at: logsDirectoryURL,
+            includingPropertiesForKeys: [
+                .creationDateKey,
+                .contentModificationDateKey,
+                .fileSizeKey,
+                .isRegularFileKey
+            ],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        availableLogs = logURLs
+            .filter { $0.pathExtension == "log" }
+            .compactMap(makeLogFile(from:))
+            .sorted { lhs, rhs in
+                if lhs.modifiedAt == rhs.modifiedAt {
+                    return lhs.fileName > rhs.fileName
+                }
+                return lhs.modifiedAt > rhs.modifiedAt
+            }
+
+        if let selectedURL {
+            activeLogFile = availableLogs.first(where: { $0.url == selectedURL })
+        } else if let currentURL = activeLogFile?.url {
+            activeLogFile = availableLogs.first(where: { $0.url == currentURL })
+        } else {
+            activeLogFile = availableLogs.first
+        }
+    }
+
+    private func pruneLogsIfNeeded(excluding excludedURL: URL) {
+        guard availableLogs.count > retainedLogLimit else { return }
+
+        for file in availableLogs.dropFirst(retainedLogLimit) where file.url != excludedURL {
+            try? fileManager.removeItem(at: file.url)
+        }
+
+        refreshAvailableLogs(selecting: excludedURL)
+    }
+
+    private func makeLogFile(from url: URL) -> SmartWakeLogFile? {
+        guard let values = try? url.resourceValues(forKeys: [
+            .creationDateKey,
+            .contentModificationDateKey,
+            .fileSizeKey,
+            .isRegularFileKey
+        ]),
+        values.isRegularFile == true else {
+            return nil
+        }
+
+        return SmartWakeLogFile(
+            id: url.lastPathComponent,
+            fileName: url.lastPathComponent,
+            url: url,
+            createdAt: values.creationDate ?? Date.distantPast,
+            modifiedAt: values.contentModificationDate ?? values.creationDate ?? Date.distantPast,
+            sizeInBytes: Int64(values.fileSize ?? 0)
+        )
+    }
+
+    private func ensureLogsDirectory() {
+        try? fileManager.createDirectory(
+            at: logsDirectoryURL,
+            withIntermediateDirectories: true
+        )
+    }
+
+    private func writeLog(
+        category: String,
+        message: String,
+        level: SmartWakeLogLevel,
+        logURL: URL
+    ) {
+        let line = "\(formatTimestamp(Date())) [\(level.rawValue)] [\(category)] \(message)\n"
+        write(line, to: logURL, append: true)
+    }
+
+    private func write(_ string: String, to url: URL, append: Bool) {
+        ensureLogsDirectory()
+
+        let data = Data(string.utf8)
+        if append {
+            if !fileManager.fileExists(atPath: url.path) {
+                fileManager.createFile(atPath: url.path, contents: nil)
+            }
+
+            guard let handle = try? FileHandle(forWritingTo: url) else { return }
+            defer { try? handle.close() }
+            do {
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+            } catch {
+                return
+            }
+        } else {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    private func makeSessionKey(scheduleID: UUID, wakeUpTime: Date) -> String {
+        "\(scheduleID.uuidString)-\(fileTimestampFormatter.string(from: wakeUpTime))"
+    }
+
+    private func makeFileName(schedule: WatchScheduleSnapshot, wakeUpTime: Date) -> String {
+        let timestamp = fileTimestampFormatter.string(from: wakeUpTime)
+        let safeName = sanitizedFileComponent(schedule.name)
+        let shortID = schedule.id.uuidString.prefix(8)
+        return "smartwake-\(timestamp)-\(safeName)-\(shortID).log"
+    }
+
+    private func sanitizedFileComponent(_ string: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let scalarView = string.unicodeScalars.map { scalar -> String in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }
+        let collapsed = scalarView.joined()
+            .replacingOccurrences(of: "--+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+        return collapsed.isEmpty ? "schedule" : collapsed.lowercased()
+    }
+
+    private func formatTimestamp(_ date: Date) -> String {
+        logTimestampFormatter.string(from: date)
+    }
+}

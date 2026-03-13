@@ -47,14 +47,16 @@ Views/
   DayOfWeekSelector.swift          Circular day-of-week picker
   LightPickerView.swift            HomeKit light multi-select
   ColorPreferenceView.swift        Start/end color pickers + gradient preview
+  WatchLogArchiveView.swift        iPhone-side viewer/share UI for imported watch smart-wake log files
 
 Services/
   HomeKitService.swift             @Observable NSObject, HMHomeManagerDelegate, light discovery + characteristic writes + onHomesUpdated retry hook
   LightController.swift            @Observable, multi-light batch writes via HomeKitService + best-effort write summaries
   ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HMTimerTrigger scenes + smart wake ownership-commit ramp execution + HomeKit retry debug state
-  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks
+  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks, receives transferred watch log files
   SmartWakeCoordinator.swift       @Observable, validates fresh watch triggers against the matching occurrence, keeps bounded handoff dedupe, and decides phone vs watch light ownership
   HealthKitAuthorizationService.swift  @Observable, tracks watch health permission status (no direct HealthKit usage on iPhone)
+  WatchLogArchiveService.swift     @Observable, stores watch-transferred smart-wake log files in iPhone Application Support for in-app viewing/sharing
 
 Utilities/
   ColorInterpolation.swift         interpolateHSB() with hue wrapping, interpolateBrightness()
@@ -72,13 +74,15 @@ Models/
   SmartWakeMessage.swift           Codable message types (duplicated from iOS)
 
 Views/
-  WatchRootView.swift              Status, schedule list, diagnostics, permission prompt
+  WatchRootView.swift              Status, schedule list, diagnostics, permission prompt, and log export shortcuts
+  WatchLogArchiveView.swift        Watch-side viewer/share UI for saved smart-wake log files
 
 Services/
-  WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, sends triggers
-  SmartWakeSessionController.swift @Observable NSObject, live HR monitoring + best-effort historical seeding, deferred watch-local HomeKit fallback modes, handoff tracking
-  SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, schedules overnight wake monitoring with `start(at:)`
-  WakeHeuristicEngine.swift        @Observable, frozen pre-window HR baseline, confidence scoring, trigger decision
+  WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, sends triggers, and transfers log files to iPhone
+  SmartWakeSessionController.swift @Observable NSObject, live HR monitoring + best-effort historical seeding, deferred watch-local HomeKit fallback modes, handoff tracking, and detailed smart-wake file logging
+  SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, schedules overnight wake monitoring with `start(at:)`, and prepares per-session log files once the next wake is known
+  WakeHeuristicEngine.swift        @Observable, frozen pre-window HR baseline, confidence scoring, trigger decision, and detailed baseline/evaluation diagnostics for the log file
+  SmartWakeLogStore.swift          @Observable, persists per-session watch log files in Application Support, keeps recent log metadata, and tracks export status
 
 Lights_Timer_Watch.entitlements    HealthKit + HomeKit
 Lights-Timer-Watch-App-Info.plist  Watch Info.plist, NSHomeKitUsageDescription, WKBackgroundModes
@@ -132,9 +136,11 @@ HomeKitService → LightController → ScheduleEngine
                                         ↓
 WatchConnectivityService ──────→ SmartWakeCoordinator(modelContainer:)
                                         ↓
-HealthKitAuthorizationService    (all injected as @Environment)
+HealthKitAuthorizationService
+WatchLogArchiveService            (all injected as @Environment)
 ```
 - `HomeKitService.onHomesUpdated` is wired here to call `ScheduleEngine.retryPendingBackgroundSync(modelContext:)` with a fresh `ModelContext` when HomeKit homes load after app init/background wake.
+- `WatchConnectivityService.onWatchLogFileReceived` is wired here to `WatchLogArchiveService.importTransferredLog(from:metadata:)`, so transferred watch logs appear on the phone automatically.
 
 ### Lifecycle Entry (`ContentView.onChange(scenePhase: .active)`)
 1. `scheduleEngine.onAppActive(modelContext:)` — checks active schedules + syncs background scenes
@@ -158,7 +164,7 @@ HealthKitAuthorizationService    (all injected as @Environment)
 ### Smart Wake (usesSmartWake == true)
 1. **No gradual ramp**: Smart wake schedules do NOT create per-minute background scenes or trigger foreground timers. Only a single fallback scene (`LT_<shortID>_fallback`) is created at the exact wake time, snapping lights to full brightness if the watch never triggers.
 2. iPhone sends `WatchScheduleSnapshot` array (including colors, `skipColorWrites`, `lightIdentifiers`, `lightNames`, and `hapticPatternRaw`) to watch via `WCSession.updateApplicationContext`. `WatchConnectivityService` caches the latest encoded payload, suppresses identical resends, and retries delivery only after WCSession activation/watch-state changes.
-3. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated`), evaluates the next relevant schedule, records the next wake window for debug UI, and uses `WKExtendedRuntimeSession.start(at:)` for overnight scheduling whenever the wake window has not started yet.
+3. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated`), evaluates the next relevant schedule, creates/reuses a persistent per-session watch log file for that wake, records the next wake window for UI, and uses `WKExtendedRuntimeSession.start(at:)` for overnight scheduling whenever the wake window has not started yet.
 4. When monitoring starts, `SmartWakeSessionController` immediately starts `HKWorkoutSession`, `HKAnchoredObjectQuery`, the wake-check timer, and trigger checks, then launches a best-effort historical heart-rate seed from `wakeUpTime - 2h` through `now`. Seed failures are logged but do not fail monitoring.
 5. `WakeHeuristicEngine` uses a frozen pre-window baseline:
    - Preferred baseline window: `windowStart - 60m` through `windowStart - 5m`
@@ -180,7 +186,19 @@ HealthKitAuthorizationService    (all injected as @Environment)
    - Watch cancels its deferred local fallback only on a positive ack for the same `triggerID`; otherwise it starts watch-local fallback on timeout or immediate negative ack.
 7. `SmartWakeSessionController.finishMonitoringAfterTrigger()` tears down workout/query/timer state and returns the controller to `.idle` after reporting `.triggered`, but it does not stop haptics or the deferred/local light fallback path.
 8. Early watch fallback starts at the same first visible/non-zero step the phone uses and never sends the all-off step. Exact wake-time fallback writes the final target light state immediately after a timeout or negative ack instead of running a dim-from-zero ramp.
-9. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the wake.
+9. The watch log file captures scheduler decisions, historical/live HR samples, every baseline recomputation, every wake evaluation verdict, every trigger/handoff event, and every watch-local HomeKit write summary (including per-light failures when writes fail).
+10. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the wake.
+
+### Persistent Smart Wake Logs
+1. `SmartWakeLogStore` writes timestamped text logs to the watch app’s Application Support directory, one file per schedule occurrence.
+2. Log lines use ISO-8601 timestamps with fractional seconds and local timezone offset so overnight ordering is unambiguous.
+3. The watch keeps recent log metadata in memory for UI access and retains up to 14 log files on disk.
+4. `WatchRootView` exposes three retrieval paths:
+   - open logs directly on the watch
+   - share the latest log from the watch share sheet
+   - queue the latest log for paired-iPhone transfer
+5. `WatchSessionManager.transferLogFile` uses `WCSession.transferFile` with metadata naming the log file.
+6. `WatchLogArchiveService` stores incoming files on the iPhone and `WatchLogArchiveView` lets the user read/share them later.
 
 ### Duplicate Prevention
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
@@ -225,6 +243,7 @@ HealthKitAuthorizationService    (all injected as @Environment)
   - `testTrigger` → `SmartWakeTriggerPayload` (bypasses validation on phone)
 - All use `[WCMessageKey.type: String, WCMessageKey.payload: Data]` envelope
 - `triggerID` correlates each trigger with its explicit phone→watch light-handoff ack.
+- Watch log files use `WCSession.transferFile` with metadata `{ kind: "smartWakeLog", filename: "<log>.log" }`; the iPhone copies them into `WatchLogArchiveService`.
 
 ## UI Structure
 
@@ -235,6 +254,7 @@ HealthKitAuthorizationService    (all injected as @Environment)
 - Enable/disable toggle per row
 - Swipe delete
 - Swipe right on smart-wake schedules: "Test Wake" debug trigger button
+- Watch Logs section: latest imported watch log status, navigation to `WatchLogArchiveView`, and share shortcut for the newest imported file
 - `#if DEBUG` section: last trigger result, last light owner, last background-scene sync status, pending HomeKit retry flag, and watch connection status
 
 ### ScheduleDetailView
@@ -245,6 +265,7 @@ HealthKitAuthorizationService    (all injected as @Environment)
 - Status section: session state icon/color/title/subtitle, health access button
 - Smart Wake Schedules section: list from `WatchSessionManager.activeSchedules`
 - Diagnostics section: heuristic summary, next scheduled wake window, baseline readiness/BPM/sample count, phone handoff status, deferred watch fallback status, phone reachability, error messages, stop button
+- Logs section: latest saved log metadata, watch-side log viewer navigation, share shortcut, and “Send Latest Log To iPhone” action
 
 ## Build And Project Notes
 
@@ -289,6 +310,7 @@ Files placed in `Lights Timer/` automatically belong to the iOS target. Files in
 - **Simulate smart wake trigger**: swipe right on any smart-wake-enabled schedule row → "Test Wake" button. Injects a simulated `SmartWakeTriggerPayload` with confidence 0.85.
 - **Watch connectivity status**: visible in `#if DEBUG` section of ScheduleListView.
 - **Heuristic diagnostics**: visible on watch UI (next window, baseline readiness/BPM/sample count, latest HR/confidence, phone handoff status, deferred fallback status).
+- **Log retrieval**: after a run, open `WatchRootView` → Logs on the watch, or open `ScheduleListView` → Watch Logs on the phone.
 
 ### What Requires Physical Devices
 - HomeKit accessory discovery and light control
@@ -342,6 +364,7 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 - Foreground ramp (`Timer.publish`) only ticks while app is in foreground. Background relies on HomeKit timer-triggered scenes.
 - Phone-side smart wake only acks after an initial ownership write, but later ramp steps still depend on background execution time; if the phone loses execution after claiming the lights, the already-written state plus the exact wake-time scene remain the backstops.
 - If the watch cannot resolve the chosen lights by UUID, it falls back to `lightNames`; if both fail, the phone may already have declined ownership and the exact wake-time fallback scene becomes the safety net.
+- Automatic watch→phone log transfer only happens when the watch explicitly queues a file (for example after a completed/failed watch-owned wake path or when the user taps “Send Latest Log To iPhone”); a scheduler-only log with no later session activity may still require manual export from the watch.
 - Watch `WKExtendedRuntimeSession` (alarm type) + `HKWorkoutSession` consume battery — extended session starts up to 2 hours before wake, HR monitoring starts up to 1 hour before wake window.
 - The extended runtime session still must be scheduled while the watch app is awake or receiving WCSession delivery. `WatchSessionManager.onSchedulesUpdated` and cached iPhone schedule sync retries reduce this risk, but they do not eliminate watchOS scheduling limits.
 - SwiftData model changes (adding/removing fields) may require migration handling for existing user data.

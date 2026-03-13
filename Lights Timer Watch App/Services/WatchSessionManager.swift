@@ -11,11 +11,13 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var onSchedulesUpdated: (([WatchScheduleSnapshot]) -> Void)?
     var onLightHandoff: ((SmartWakeLightHandoffPayload) -> Void)?
 
+    private let logStore: SmartWakeLogStore
     private var session: WCSession?
     private var hasProcessedIncomingApplicationContext = false
     private var lastProcessedSchedulesPayload: Data?
 
-    override init() {
+    init(logStore: SmartWakeLogStore) {
+        self.logStore = logStore
         super.init()
         if WCSession.isSupported() {
             let session = WCSession.default
@@ -28,6 +30,10 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     // MARK: - Send to Phone
 
     func sendTrigger(_ payload: SmartWakeTriggerPayload) {
+        logStore.log(
+            "CONNECTIVITY",
+            "Sending smart wake trigger \(payload.triggerID.uuidString) to phone"
+        )
         sendRealtimeMessage(payload, type: WCMessageKey.smartWakeTriggered)
     }
 
@@ -44,7 +50,11 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 session.sendMessage(message, replyHandler: nil, errorHandler: nil)
             }
         } catch {
-            print("[WatchSession] Failed to send state: \(error)")
+            logStore.log(
+                "CONNECTIVITY",
+                "Failed to send session state: \(error.localizedDescription)",
+                level: .error
+            )
         }
     }
 
@@ -54,6 +64,10 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     }
 
     func sendTestTrigger(_ payload: SmartWakeTriggerPayload) {
+        logStore.log(
+            "CONNECTIVITY",
+            "Sending watch test trigger \(payload.triggerID.uuidString) to phone"
+        )
         sendRealtimeMessage(payload, type: WCMessageKey.testTrigger)
     }
 
@@ -74,8 +88,30 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 session.sendMessage(message, replyHandler: nil, errorHandler: nil)
             }
         } catch {
-            print("[WatchSession] Failed to send permission status: \(error)")
+            logStore.log(
+                "CONNECTIVITY",
+                "Failed to send permission status: \(error.localizedDescription)",
+                level: .error
+            )
         }
+    }
+
+    func transferLogFile(_ url: URL) {
+        guard let session else {
+            logStore.noteFailedTransfer(for: url.lastPathComponent, error: "WCSession unavailable")
+            return
+        }
+
+        let metadata: [String: Any] = [
+            "kind": "smartWakeLog",
+            "filename": url.lastPathComponent
+        ]
+        session.transferFile(url, metadata: metadata)
+        logStore.noteQueuedTransfer(for: url)
+        logStore.log(
+            "CONNECTIVITY",
+            "Queued watch log transfer to iPhone: \(url.lastPathComponent)"
+        )
     }
 
     private func sendRealtimeMessage<T: Codable>(_ payload: T, type: String) {
@@ -90,13 +126,21 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
 
             // On watchOS, sendMessage can wake the iPhone app even when isReachable is false.
             session.sendMessage(message, replyHandler: { reply in
-                print("[WatchSession] \(type) sent, reply: \(reply)")
+                self.logStore.log("CONNECTIVITY", "\(type) sent successfully. reply=\(reply)")
             }, errorHandler: { error in
-                print("[WatchSession] sendMessage failed for \(type): \(error), using transferUserInfo")
+                self.logStore.log(
+                    "CONNECTIVITY",
+                    "sendMessage failed for \(type): \(error.localizedDescription). Falling back to transferUserInfo.",
+                    level: .warning
+                )
                 session.transferUserInfo(message)
             })
         } catch {
-            print("[WatchSession] Failed to encode \(type): \(error)")
+            logStore.log(
+                "CONNECTIVITY",
+                "Failed to encode \(type): \(error.localizedDescription)",
+                level: .error
+            )
         }
     }
 
@@ -112,14 +156,27 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
 
             if session.isReachable {
                 session.sendMessage(message, replyHandler: nil) { error in
-                    print("[WatchSession] sendMessage failed for \(type): \(error), using transferUserInfo")
+                    self.logStore.log(
+                        "CONNECTIVITY",
+                        "sendMessage failed for \(type): \(error.localizedDescription). Falling back to transferUserInfo.",
+                        level: .warning
+                    )
                     session.transferUserInfo(message)
                 }
             } else {
                 session.transferUserInfo(message)
+                logStore.log(
+                    "CONNECTIVITY",
+                    "Phone not reachable. Queued \(type) via transferUserInfo",
+                    level: .warning
+                )
             }
         } catch {
-            print("[WatchSession] Failed to encode \(type): \(error)")
+            logStore.log(
+                "CONNECTIVITY",
+                "Failed to encode \(type): \(error.localizedDescription)",
+                level: .error
+            )
         }
     }
 
@@ -132,6 +189,10 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     ) {
         Task { @MainActor in
             self.isPhoneReachable = session.isReachable
+            self.logStore.log(
+                "CONNECTIVITY",
+                "WCSession activated. state=\(activationState.rawValue) reachable=\(session.isReachable)"
+            )
             guard !self.hasProcessedIncomingApplicationContext else { return }
             self.processApplicationContext(session.receivedApplicationContext)
         }
@@ -157,6 +218,10 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             self.isPhoneReachable = session.isReachable
+            self.logStore.log(
+                "CONNECTIVITY",
+                "Phone reachability changed. reachable=\(session.isReachable)"
+            )
         }
     }
 
@@ -192,9 +257,16 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
             lastProcessedSchedulesPayload = data
             activeSchedules = schedules
             onSchedulesUpdated?(schedules)
-            print("[WatchSession] Received \(schedules.count) schedule(s) from phone")
+            logStore.log(
+                "CONNECTIVITY",
+                "Received \(schedules.count) smart-wake schedule snapshot(s) from phone"
+            )
         } catch {
-            print("[WatchSession] Failed to decode schedules: \(error)")
+            logStore.log(
+                "CONNECTIVITY",
+                "Failed to decode schedules: \(error.localizedDescription)",
+                level: .error
+            )
         }
     }
 
@@ -208,12 +280,44 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 let payload = try JSONDecoder().decode(SmartWakeLightHandoffPayload.self, from: data)
                 lastLightHandoff = payload
                 onLightHandoff?(payload)
-                print("[WatchSession] Received handoff for trigger \(payload.triggerID): phoneWillHandleLights=\(payload.phoneWillHandleLights)")
+                logStore.log(
+                    "CONNECTIVITY",
+                    "Received phone handoff for trigger \(payload.triggerID.uuidString). phoneWillHandleLights=\(payload.phoneWillHandleLights)"
+                )
             } catch {
-                print("[WatchSession] Failed to decode handoff: \(error)")
+                logStore.log(
+                    "CONNECTIVITY",
+                    "Failed to decode phone handoff: \(error.localizedDescription)",
+                    level: .error
+                )
             }
         default:
             break
+        }
+    }
+
+    nonisolated func session(
+        _ session: WCSession,
+        didFinish fileTransfer: WCSessionFileTransfer,
+        error: Error?
+    ) {
+        Task { @MainActor in
+            let fileName = (fileTransfer.file.metadata?["filename"] as? String)
+                ?? fileTransfer.file.fileURL.lastPathComponent
+            if let error {
+                self.logStore.noteFailedTransfer(for: fileName, error: error.localizedDescription)
+                self.logStore.log(
+                    "CONNECTIVITY",
+                    "Watch log transfer failed for \(fileName): \(error.localizedDescription)",
+                    level: .error
+                )
+            } else {
+                self.logStore.noteCompletedTransfer(for: fileName)
+                self.logStore.log(
+                    "CONNECTIVITY",
+                    "Watch log transfer finished for \(fileName)"
+                )
+            }
         }
     }
 }
