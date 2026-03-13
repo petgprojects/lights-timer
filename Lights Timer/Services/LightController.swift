@@ -11,9 +11,11 @@ struct MultiLightWriteSummary {
 @Observable
 final class LightController {
     private let homeKitService: HomeKitService
+    private let logStore: PhoneLogStore
 
-    init(homeKitService: HomeKitService) {
+    init(homeKitService: HomeKitService, logStore: PhoneLogStore) {
         self.homeKitService = homeKitService
+        self.logStore = logStore
     }
 
     func applyLightState(
@@ -102,7 +104,9 @@ final class LightController {
                         )
                         return true
                     } catch {
-                        print("[LightController] Failed to apply light state to \(id): \(error)")
+                        await MainActor.run {
+                            self.log("Failed to apply light state to \(id): \(error)", level: .error)
+                        }
                         return false
                     }
                 }
@@ -119,5 +123,9 @@ final class LightController {
 
             return MultiLightWriteSummary(attempted: attempted, succeeded: succeeded)
         }
+    }
+
+    private func log(_ message: String, level: PhoneLogLevel = .info) {
+        logStore.log("LightController", message, level: level)
     }
 }

@@ -3,6 +3,8 @@ import HomeKit
 
 @Observable
 final class HomeKitService: NSObject, HMHomeManagerDelegate {
+    private let logStore: PhoneLogStore
+
     var homes: [HMHome] = []
     var availableLights: [HMAccessory] = []
     var isAuthorized: Bool = false
@@ -11,10 +13,12 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
 
     private let homeManager: HMHomeManager
 
-    override init() {
+    init(logStore: PhoneLogStore) {
+        self.logStore = logStore
         homeManager = HMHomeManager()
         super.init()
         homeManager.delegate = self
+        log("HomeKit service initialized")
     }
 
     /// Waits for HomeKit homes to be available. Returns immediately if already ready.
@@ -22,10 +26,18 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
     func waitForReady(timeout: TimeInterval = 10) async {
         if !homes.isEmpty { return }
 
+        log("Waiting for HomeKit homes (timeout=\(Int(timeout))s)")
+
         // Poll for readiness — HMHomeManager fires its delegate on main thread
         let deadline = Date().addingTimeInterval(timeout)
         while homes.isEmpty && Date() < deadline {
             try? await Task.sleep(for: .milliseconds(250))
+        }
+
+        if homes.isEmpty {
+            log("Timed out waiting for HomeKit homes", level: .warning)
+        } else {
+            log("HomeKit homes became ready: homes=\(homes.count), lights=\(availableLights.count)")
         }
     }
 
@@ -36,6 +48,7 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
             homes = manager.homes
             isAuthorized = true
             refreshLights()
+            log("Home manager updated: homes=\(homes.count), lights=\(availableLights.count)")
             onHomesUpdated?()
         }
     }
@@ -112,6 +125,10 @@ final class HomeKitService: NSObject, HMHomeManagerDelegate {
                 }
             }
         }
+    }
+
+    private func log(_ message: String, level: PhoneLogLevel = .info) {
+        logStore.log("HomeKitService", message, level: level)
     }
 }
 

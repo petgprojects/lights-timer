@@ -29,6 +29,7 @@ final class ScheduleEngine {
 
     let homeKitService: HomeKitService
     private let lightController: LightController
+    private let logStore: PhoneLogStore
     private var timerCancellable: AnyCancellable?
     private var smartWakeTask: Task<Void, Never>?
     private(set) var activeSchedule: LightSchedule?
@@ -48,9 +49,14 @@ final class ScheduleEngine {
     private(set) var lastBackgroundSyncError: String?
     private(set) var hasPendingHomeKitRetry: Bool = false
 
-    init(homeKitService: HomeKitService, lightController: LightController) {
+    init(
+        homeKitService: HomeKitService,
+        lightController: LightController,
+        logStore: PhoneLogStore
+    ) {
         self.homeKitService = homeKitService
         self.lightController = lightController
+        self.logStore = logStore
     }
 
     // MARK: - Lifecycle Entry Point
@@ -58,6 +64,8 @@ final class ScheduleEngine {
     /// Called when the app comes to foreground or when a schedule is saved.
     /// This is the main entry point that orchestrates everything.
     func onAppActive(modelContext: ModelContext) async {
+        log("onAppActive started")
+
         // 1. Check if any schedule is currently in its execution window
         //    and start foreground execution if so
         await checkForActiveSchedules(modelContext: modelContext)
@@ -65,10 +73,13 @@ final class ScheduleEngine {
         // 2. Set up background triggers (scenes) for future schedules
         await homeKitService.waitForReady()
         await syncBackgroundScenes(modelContext: modelContext)
+
+        log("onAppActive finished")
     }
 
     func retryPendingBackgroundSync(modelContext: ModelContext) async {
         guard hasPendingHomeKitRetry, !homeKitService.homes.isEmpty else { return }
+        log("Retrying pending HomeKit background sync")
         await syncBackgroundScenes(modelContext: modelContext)
     }
 
@@ -79,7 +90,10 @@ final class ScheduleEngine {
     /// the foreground timer for smooth transitions.
     func checkForActiveSchedules(modelContext: ModelContext) async {
         // Don't interrupt an already-running execution
-        if isRunning { return }
+        if isRunning {
+            log("Skipping active schedule check because an execution is already running", level: .warning)
+            return
+        }
 
         do {
             let descriptor = FetchDescriptor<LightSchedule>(
@@ -108,7 +122,7 @@ final class ScheduleEngine {
                 }
             }
         } catch {
-            print("[ScheduleEngine] Failed to check schedules: \(error)")
+            log("Failed to check schedules: \(error)", level: .error)
         }
     }
 
@@ -119,7 +133,7 @@ final class ScheduleEngine {
         transitionStartTime = startTime
         transitionEndTime = endTime
 
-        print("[ScheduleEngine] Starting foreground execution for '\(schedule.name)' until \(endTime)")
+        log("Starting foreground execution for '\(schedule.name)' until \(formatTimestamp(endTime))")
 
         timerCancellable = Timer.publish(every: 15, on: .main, in: .common)
             .autoconnect()
@@ -149,7 +163,7 @@ final class ScheduleEngine {
             UIApplication.shared.endBackgroundTask(smartWakeBackgroundTaskID)
             smartWakeBackgroundTaskID = .invalid
         }
-        print("[ScheduleEngine] Stopped foreground execution")
+        log("Stopped foreground execution")
     }
 
     private func tickForegroundExecution() async {
@@ -194,7 +208,7 @@ final class ScheduleEngine {
 
         let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
 
-        print("[ScheduleEngine] Tick: progress=\(String(format: "%.1f%%", progress * 100)), brightness=\(brightness)")
+        log("Tick: progress=\(String(format: "%.1f%%", progress * 100)), brightness=\(brightness)")
 
         do {
             try await lightController.applyToMultipleLights(
@@ -206,7 +220,7 @@ final class ScheduleEngine {
                 identifiers: identifiers
             )
         } catch {
-            print("[ScheduleEngine] Failed to apply light state: \(error)")
+            log("Failed to apply light state: \(error)", level: .error)
         }
     }
 
@@ -215,9 +229,10 @@ final class ScheduleEngine {
     /// Starts a test run of the full light ramp from now to now + leadTimeMinutes.
     func startTestExecution(for schedule: LightSchedule) {
         guard !isRunning else {
-            print("[ScheduleEngine] Already running, ignoring test")
+            log("Already running, ignoring test", level: .warning)
             return
         }
+        log("Starting test execution for '\(schedule.name)' lasting \(schedule.leadTimeMinutes) minute(s)")
         let startTime = Date()
         let endTime = startTime.addingTimeInterval(TimeInterval(schedule.leadTimeMinutes * 60))
         startForegroundExecution(for: schedule, startTime: startTime, endTime: endTime)
@@ -230,26 +245,34 @@ final class ScheduleEngine {
     /// Falls back to setting final values immediately if background time is very short.
     func startSmartWakeExecution(for schedule: LightSchedule) async -> SmartWakeStartResult {
         guard !isRunning else {
-            print("[ScheduleEngine] Already running, ignoring smart wake trigger")
+            log("Already running, ignoring smart wake trigger", level: .warning)
             return .watchFallback(reason: "Phone ramp already running")
         }
 
+        log(
+            "Attempting smart wake execution for '\(schedule.name)' with backgroundTimeRemaining=\(Int(UIApplication.shared.backgroundTimeRemaining))s"
+        )
+
         await homeKitService.waitForReady(timeout: 6)
         guard !homeKitService.homes.isEmpty else {
-            print("[ScheduleEngine] HomeKit homes unavailable, cannot start smart wake")
+            log("HomeKit homes unavailable, cannot start smart wake", level: .warning)
             return .watchFallback(reason: "HomeKit homes unavailable")
         }
 
         let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
         guard !identifiers.isEmpty else {
-            print("[ScheduleEngine] No light identifiers, cannot start smart wake")
+            log("No light identifiers, cannot start smart wake", level: .warning)
             return .watchFallback(reason: "No light identifiers")
         }
 
         guard let rampPlan = makeSmartWakeRampPlan(for: schedule, identifiers: identifiers) else {
-            print("[ScheduleEngine] No visible smart wake step, cannot start smart wake")
+            log("No visible smart wake step, cannot start smart wake", level: .warning)
             return .watchFallback(reason: "No visible smart wake step")
         }
+
+        log(
+            "Smart wake ramp plan for '\(schedule.name)': duration=\(Int(rampPlan.rampDuration))s, stepInterval=\(Int(rampPlan.stepInterval))s, stepCount=\(rampPlan.stepCount), firstVisibleStep=\(rampPlan.firstVisibleStep), lights=\(rampPlan.identifiers.count), removeFallbackScene=\(rampPlan.shouldRemoveFallbackScene)"
+        )
 
         activeSchedule = schedule
 
@@ -273,8 +296,11 @@ final class ScheduleEngine {
             skipColor: schedule.skipColorWrites,
             identifiers: rampPlan.identifiers
         )
+        log(
+            "Smart wake ownership write for '\(schedule.name)': attempted=\(initialWrite.attempted), succeeded=\(initialWrite.succeeded), brightness=\(initialState.brightness), progress=\(String(format: "%.0f%%", initialState.progress * 100))"
+        )
         guard initialWrite.hadAnySuccess else {
-            print("[ScheduleEngine] Phone could not claim any selected lights for '\(schedule.name)'")
+            log("Phone could not claim any selected lights for '\(schedule.name)'", level: .warning)
             stopForegroundExecution()
             return .watchFallback(reason: "Phone could not claim any selected lights")
         }
@@ -302,9 +328,7 @@ final class ScheduleEngine {
         rampPlan: SmartWakeRampPlan,
         startingStep: Int
     ) async {
-        print(
-            "[ScheduleEngine] Smart wake ramp: \(Int(rampPlan.rampDuration))s, \(rampPlan.stepCount) steps for '\(schedule.name)'"
-        )
+        log("Smart wake ramp: \(Int(rampPlan.rampDuration))s, \(rampPlan.stepCount) steps for '\(schedule.name)'")
 
         if startingStep <= rampPlan.stepCount {
             for step in startingStep...rampPlan.stepCount {
@@ -312,7 +336,7 @@ final class ScheduleEngine {
 
                 let remaining = UIApplication.shared.backgroundTimeRemaining
                 if remaining < 6 && remaining < 100 {
-                    print("[ScheduleEngine] Background time low (\(Int(remaining))s), jumping to final state")
+                    log("Background time low (\(Int(remaining))s), jumping to final state", level: .warning)
                     break
                 }
 
@@ -323,8 +347,8 @@ final class ScheduleEngine {
                 )
                 currentProgress = state.progress
 
-                print(
-                    "[ScheduleEngine] Smart wake step \(step)/\(rampPlan.stepCount): brightness=\(state.brightness), progress=\(String(format: "%.0f%%", state.progress * 100))"
+                log(
+                    "Smart wake step \(step)/\(rampPlan.stepCount): brightness=\(state.brightness), progress=\(String(format: "%.0f%%", state.progress * 100))"
                 )
 
                 let stepWrite = await lightController.applyBestEffortToMultipleLights(
@@ -335,8 +359,11 @@ final class ScheduleEngine {
                     skipColor: schedule.skipColorWrites,
                     identifiers: rampPlan.identifiers
                 )
+                log(
+                    "Smart wake step \(step) write summary: attempted=\(stepWrite.attempted), succeeded=\(stepWrite.succeeded)"
+                )
                 if !stepWrite.hadAnySuccess {
-                    print("[ScheduleEngine] Smart wake step \(step) did not reach any selected lights")
+                    log("Smart wake step \(step) did not reach any selected lights", level: .warning)
                 }
 
                 if step < rampPlan.stepCount {
@@ -354,11 +381,15 @@ final class ScheduleEngine {
                 skipColor: schedule.skipColorWrites,
                 identifiers: rampPlan.identifiers
             )
+            log(
+                "Smart wake final write summary: attempted=\(finalWrite.attempted), succeeded=\(finalWrite.succeeded), brightness=\(schedule.targetBrightness)"
+            )
             if !finalWrite.hadAnySuccess {
-                print("[ScheduleEngine] Smart wake final write did not reach any selected lights")
+                log("Smart wake final write did not reach any selected lights", level: .warning)
             }
 
             if rampPlan.shouldRemoveFallbackScene && finalWrite.hadAnySuccess {
+                log("Phone ramp completed successfully; removing fallback scenes for '\(schedule.name)'")
                 await cleanupScenesForSchedule(schedule.id)
             }
         }
@@ -370,6 +401,8 @@ final class ScheduleEngine {
     private func cleanupScenesForSchedule(_ scheduleID: UUID) async {
         let shortID = String(scheduleID.uuidString.prefix(8))
         let prefix = "LT_\(shortID)_"
+
+        log("Cleaning up scenes for schedule prefix \(prefix)")
 
         for home in homeKitService.homes {
             let triggers = home.triggers.filter { $0.name.hasPrefix(prefix) }
@@ -456,12 +489,12 @@ final class ScheduleEngine {
         guard !homeKitService.homes.isEmpty else {
             hasPendingHomeKitRetry = true
             lastBackgroundSyncError = "Waiting for HomeKit homes"
-            print("[ScheduleEngine] No HomeKit homes available, skipping scene sync")
+            log("No HomeKit homes available, skipping scene sync", level: .warning)
             return
         }
 
         guard !isSyncing else {
-            print("[ScheduleEngine] Sync already in progress, skipping")
+            log("Sync already in progress, skipping", level: .warning)
             return
         }
 
@@ -510,13 +543,15 @@ final class ScheduleEngine {
 
             lastBackgroundSyncSucceededAt = Date()
             lastBackgroundSyncError = nil
+            log("Finished background scene sync")
         } catch {
             lastBackgroundSyncError = error.localizedDescription
-            print("[ScheduleEngine] Failed to sync scenes: \(error)")
+            log("Failed to sync scenes: \(error)", level: .error)
         }
     }
 
     private func cleanupOldScenesAndTriggers() async {
+        log("Cleaning up old HomeKit scenes and triggers")
         for home in homeKitService.homes {
             // Remove old triggers
             let oldTriggers = home.triggers.filter { $0.name.hasPrefix("LT_") }
@@ -524,7 +559,7 @@ final class ScheduleEngine {
                 do {
                     try await removeTrigger(trigger, from: home)
                 } catch {
-                    print("[ScheduleEngine] Failed to remove trigger: \(error)")
+                    log("Failed to remove trigger: \(error)", level: .error)
                 }
             }
 
@@ -534,7 +569,7 @@ final class ScheduleEngine {
                 do {
                     try await removeActionSet(scene, from: home)
                 } catch {
-                    print("[ScheduleEngine] Failed to remove scene: \(error)")
+                    log("Failed to remove scene: \(error)", level: .error)
                 }
             }
         }
@@ -542,7 +577,7 @@ final class ScheduleEngine {
 
     private func createScenesForSchedule(_ schedule: LightSchedule) async {
         guard let wakeUpTime = nextOccurrence(for: schedule) else {
-            print("[ScheduleEngine] No next occurrence for '\(schedule.name)'")
+            log("No next occurrence for '\(schedule.name)'", level: .warning)
             return
         }
 
@@ -555,7 +590,7 @@ final class ScheduleEngine {
                 identifiers.contains(accessory.uniqueIdentifier)
             }
         }) else {
-            print("[ScheduleEngine] No home found with target lights")
+            log("No home found with target lights", level: .warning)
             return
         }
 
@@ -568,7 +603,7 @@ final class ScheduleEngine {
             guard wakeUpTime > now else { return }
 
             let sceneName = "LT_\(shortID)_fallback"
-            print("[ScheduleEngine] Creating fallback scene for smart wake '\(schedule.name)' at \(wakeUpTime)")
+            log("Creating fallback scene for smart wake '\(schedule.name)' at \(formatTimestamp(wakeUpTime))")
 
             do {
                 let actionSet = try await addActionSet(withName: sceneName, to: home)
@@ -616,11 +651,11 @@ final class ScheduleEngine {
                 try await enableTrigger(trigger)
                 syncStepsCompleted += 1
             } catch {
-                print("[ScheduleEngine] Failed to create fallback scene \(sceneName): \(error)")
+                log("Failed to create fallback scene \(sceneName): \(error)", level: .error)
                 syncStepsCompleted += 1
             }
 
-            print("[ScheduleEngine] Finished creating fallback scene for '\(schedule.name)'")
+            log("Finished creating fallback scene for '\(schedule.name)'")
             return
         }
 
@@ -630,7 +665,7 @@ final class ScheduleEngine {
         let stepCount = schedule.leadTimeMinutes
         let now = Date()
 
-        print("[ScheduleEngine] Creating \(stepCount) scenes for '\(schedule.name)' starting at \(startTime)")
+        log("Creating \(stepCount) scenes for '\(schedule.name)' starting at \(formatTimestamp(startTime))")
 
         for step in 1...stepCount {
             let progress = Double(step) / Double(stepCount)
@@ -728,12 +763,12 @@ final class ScheduleEngine {
 
                 syncStepsCompleted += 1
             } catch {
-                print("[ScheduleEngine] Failed to create scene \(sceneName): \(error)")
+                log("Failed to create scene \(sceneName): \(error)", level: .error)
                 syncStepsCompleted += 1
             }
         }
 
-        print("[ScheduleEngine] Finished creating scenes for '\(schedule.name)'")
+        log("Finished creating scenes for '\(schedule.name)'")
     }
 
     // MARK: - Helpers
@@ -845,5 +880,16 @@ final class ScheduleEngine {
                 else { continuation.resume() }
             }
         }
+    }
+
+    private func log(_ message: String, level: PhoneLogLevel = .info) {
+        logStore.log("ScheduleEngine", message, level: level)
+    }
+
+    private func formatTimestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
+        formatter.timeZone = .current
+        return formatter.string(from: date)
     }
 }

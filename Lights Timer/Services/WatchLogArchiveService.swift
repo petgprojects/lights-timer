@@ -19,13 +19,17 @@ struct ImportedWatchLogFile: Identifiable, Hashable {
 
 @Observable
 final class WatchLogArchiveService {
+    private let logStore: PhoneLogStore
+
     private(set) var importedLogs: [ImportedWatchLogFile] = []
     private(set) var lastImportStatus = "No watch logs imported yet"
 
     private let fileManager = FileManager.default
     private let logsDirectoryURL: URL
 
-    init() {
+    init(logStore: PhoneLogStore) {
+        self.logStore = logStore
+
         let appSupportURL = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -34,6 +38,7 @@ final class WatchLogArchiveService {
 
         ensureLogsDirectory()
         refreshImportedLogs()
+        log("Watch log archive ready with \(importedLogs.count) imported file(s)")
     }
 
     var latestLog: ImportedWatchLogFile? {
@@ -52,8 +57,10 @@ final class WatchLogArchiveService {
             }
             try fileManager.copyItem(at: temporaryURL, to: destinationURL)
             lastImportStatus = "Imported \(proposedFileName)"
+            log("Imported watch log file \(proposedFileName)")
         } catch {
             lastImportStatus = "Failed to import \(proposedFileName): \(error.localizedDescription)"
+            log("Failed to import watch log file \(proposedFileName): \(error.localizedDescription)", level: .error)
         }
 
         refreshImportedLogs()
@@ -115,5 +122,9 @@ final class WatchLogArchiveService {
             modifiedAt: values.contentModificationDate ?? values.creationDate ?? Date.distantPast,
             sizeInBytes: Int64(values.fileSize ?? 0)
         )
+    }
+
+    private func log(_ message: String, level: PhoneLogLevel = .info) {
+        logStore.log("WatchLogArchive", message, level: level)
     }
 }

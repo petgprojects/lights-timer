@@ -47,16 +47,18 @@ Views/
   DayOfWeekSelector.swift          Circular day-of-week picker
   LightPickerView.swift            HomeKit light multi-select
   ColorPreferenceView.swift        Start/end color pickers + gradient preview
+  PhoneLogArchiveView.swift        iPhone-side viewer/share UI for runtime + per-launch phone log files
   WatchLogArchiveView.swift        iPhone-side viewer/share UI for imported watch smart-wake log files
 
 Services/
-  HomeKitService.swift             @Observable NSObject, HMHomeManagerDelegate, light discovery + characteristic writes + onHomesUpdated retry hook
-  LightController.swift            @Observable, multi-light batch writes via HomeKitService + best-effort write summaries
-  ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HMTimerTrigger scenes + smart wake ownership-commit ramp execution + HomeKit retry debug state
-  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks, receives transferred watch log files
-  SmartWakeCoordinator.swift       @Observable, validates fresh watch triggers against the matching occurrence, keeps bounded handoff dedupe, and decides phone vs watch light ownership
-  HealthKitAuthorizationService.swift  @Observable, tracks watch health permission status (no direct HealthKit usage on iPhone)
-  WatchLogArchiveService.swift     @Observable, stores watch-transferred smart-wake log files in iPhone Application Support for in-app viewing/sharing
+  HomeKitService.swift             @Observable NSObject, HMHomeManagerDelegate, light discovery + characteristic writes + onHomesUpdated retry hook + phone-side HomeKit runtime logging
+  LightController.swift            @Observable, multi-light batch writes via HomeKitService + best-effort write summaries + persisted failure logging
+  PhoneLogStore.swift              @Observable, persists an always-on iPhone runtime log plus per-launch log files in Application Support, mirrors app-generated phone logs to disk and console, and exposes metadata for in-app viewing/sharing
+  ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HMTimerTrigger scenes + smart wake ownership-commit ramp execution + HomeKit retry debug state + persisted phone logging for ramp/scene decisions
+  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks, receives transferred watch log files, and logs WCSession state/messages
+  SmartWakeCoordinator.swift       @Observable, validates fresh watch triggers against the matching occurrence, keeps bounded handoff dedupe, decides phone vs watch light ownership, and logs trigger/handoff decisions to phone files
+  HealthKitAuthorizationService.swift  @Observable, tracks watch health permission status (no direct HealthKit usage on iPhone) and logs watch-status changes to phone files
+  WatchLogArchiveService.swift     @Observable, stores watch-transferred smart-wake log files in iPhone Application Support for in-app viewing/sharing and logs import results
 
 Utilities/
   ColorInterpolation.swift         interpolateHSB() with hue wrapping, interpolateBrightness()
@@ -132,6 +134,8 @@ Watch→iPhone state: `.idle`, `.monitoring`, `.triggered`, `.failed` + schedule
 ### App Initialization (`Lights_TimerApp.init`)
 ```
 ModelContainer (created manually, shared with SmartWakeCoordinator)
+PhoneLogStore ───────────────────→ ContentView / ScheduleListView / PhoneLogArchiveView
+      ↓
 HomeKitService → LightController → ScheduleEngine
                                         ↓
 WatchConnectivityService ──────→ SmartWakeCoordinator(modelContainer:)
@@ -139,6 +143,7 @@ WatchConnectivityService ──────→ SmartWakeCoordinator(modelContain
 HealthKitAuthorizationService
 WatchLogArchiveService            (all injected as @Environment)
 ```
+- `PhoneLogStore` is created first so iPhone runtime + per-launch file logging starts during app init, before the rest of the phone service graph begins emitting logs.
 - `HomeKitService.onHomesUpdated` is wired here to call `ScheduleEngine.retryPendingBackgroundSync(modelContext:)` with a fresh `ModelContext` when HomeKit homes load after app init/background wake.
 - `WatchConnectivityService.onWatchLogFileReceived` is wired here to `WatchLogArchiveService.importTransferredLog(from:metadata:)`, so transferred watch logs appear on the phone automatically.
 
@@ -203,6 +208,15 @@ WatchLogArchiveService            (all injected as @Environment)
 6. `WatchSessionManager.transferLogFile` uses `WCSession.transferFile` with metadata naming the log file.
 7. `WatchLogArchiveService` stores incoming files on the iPhone and `WatchLogArchiveView` lets the user read/share them later.
 
+### Persistent iPhone Logs
+1. `PhoneLogStore` writes timestamped text logs to the iPhone app’s Application Support directory:
+   - `iphone-runtime.log` records all app-generated iPhone logs from launch onward
+   - one `iphone-launch-<timestamp>.log` file is created per app launch and records that launch’s focused session
+2. The same phone log call writes to disk and mirrors to `print`, so app-generated iPhone console output and saved phone-log output stay aligned.
+3. `PhoneLogStore` is shared across `HomeKitService`, `LightController`, `ScheduleEngine`, `WatchConnectivityService`, `SmartWakeCoordinator`, `HealthKitAuthorizationService`, `WatchLogArchiveService`, and `ContentView`, so startup, lifecycle, HomeKit readiness, WCSession state, trigger/handoff decisions, and ramp execution all land in the saved phone logs.
+4. The phone retains up to 14 launch-log files plus the append-only runtime log.
+5. `ScheduleListView` exposes a Phone Logs section, and `PhoneLogArchiveView` lets the user read/share both runtime and per-launch logs directly on the iPhone.
+
 ### Duplicate Prevention
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
 - `SmartWakeCoordinator.processedHandoffs[triggerID]` — timestamped handoff records; duplicate deliveries resend the same ownership ack instead of reprocessing. Entries are pruned after 24 hours and capped at 256 by oldest-first eviction.
@@ -257,6 +271,7 @@ WatchLogArchiveService            (all injected as @Environment)
 - Enable/disable toggle per row
 - Swipe delete
 - Swipe right on smart-wake schedules: "Test Wake" debug trigger button
+- Phone Logs section: latest phone-log capture status, navigation to `PhoneLogArchiveView`, and share shortcuts for the runtime log + latest launch log
 - Watch Logs section: latest imported watch log status, navigation to `WatchLogArchiveView`, and share shortcut for the newest imported file
 - `#if DEBUG` section: last trigger result, last light owner, last background-scene sync status, pending HomeKit retry flag, and watch connection status
 
@@ -313,7 +328,7 @@ Files placed in `Lights Timer/` automatically belong to the iOS target. Files in
 - **Simulate smart wake trigger**: swipe right on any smart-wake-enabled schedule row → "Test Wake" button. Injects a simulated `SmartWakeTriggerPayload` with confidence 0.85.
 - **Watch connectivity status**: visible in `#if DEBUG` section of ScheduleListView.
 - **Heuristic diagnostics**: visible on watch UI (next window, baseline readiness/BPM/sample count, latest HR/confidence, phone handoff status, deferred fallback status).
-- **Log retrieval**: after a run, open `WatchRootView` → Logs on the watch, or open `ScheduleListView` → Watch Logs on the phone.
+- **Log retrieval**: after a run, open `ScheduleListView` → Phone Logs for local iPhone logs, `ScheduleListView` → Watch Logs for imported watch logs, or `WatchRootView` → Logs on the watch.
 
 ### What Requires Physical Devices
 - HomeKit accessory discovery and light control
@@ -367,6 +382,7 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 - Foreground ramp (`Timer.publish`) only ticks while app is in foreground. Background relies on HomeKit timer-triggered scenes.
 - Phone-side smart wake only acks after an initial ownership write, but later ramp steps still depend on background execution time; if the phone loses execution after claiming the lights, the already-written state plus the exact wake-time scene remain the backstops.
 - If the watch cannot resolve the chosen lights by UUID, it falls back to `lightNames`; if both fail, the phone may already have declined ownership and the exact wake-time fallback scene becomes the safety net.
+- Phone log files mirror app-generated logs, not arbitrary iOS system/framework lines that Xcode may surface outside this app’s code.
 - Automatic watch→phone log transfer only happens when the watch explicitly queues files (for example after a completed/failed watch-owned wake path or when the user taps a send action in the Logs section); if you want the most complete picture, export the runtime log.
 - Watch `WKExtendedRuntimeSession` (alarm type) + `HKWorkoutSession` consume battery — extended session starts up to 2 hours before wake, HR monitoring starts up to 1 hour before wake window.
 - The extended runtime session still must be scheduled while the watch app is awake or receiving WCSession delivery. `WatchSessionManager.onSchedulesUpdated` and cached iPhone schedule sync retries reduce this risk, but they do not eliminate watchOS scheduling limits.

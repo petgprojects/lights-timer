@@ -4,28 +4,36 @@ import SwiftData
 @main
 struct Lights_TimerApp: App {
     let modelContainer: ModelContainer
-    @State private var homeKitService = HomeKitService()
+    @State private var phoneLogStore: PhoneLogStore
+    @State private var homeKitService: HomeKitService
     @State private var lightController: LightController
     @State private var scheduleEngine: ScheduleEngine
-    @State private var watchConnectivity = WatchConnectivityService()
+    @State private var watchConnectivity: WatchConnectivityService
     @State private var smartWakeCoordinator: SmartWakeCoordinator
-    @State private var healthKitAuth = HealthKitAuthorizationService()
+    @State private var healthKitAuth: HealthKitAuthorizationService
     @State private var watchLogArchive: WatchLogArchiveService
 
     init() {
         let container = try! ModelContainer(for: LightSchedule.self)
         self.modelContainer = container
 
-        let service = HomeKitService()
-        let controller = LightController(homeKitService: service)
-        let engine = ScheduleEngine(homeKitService: service, lightController: controller)
-        let connectivity = WatchConnectivityService()
-        let watchLogArchive = WatchLogArchiveService()
+        let phoneLogStore = PhoneLogStore()
+        let service = HomeKitService(logStore: phoneLogStore)
+        let controller = LightController(homeKitService: service, logStore: phoneLogStore)
+        let engine = ScheduleEngine(
+            homeKitService: service,
+            lightController: controller,
+            logStore: phoneLogStore
+        )
+        let connectivity = WatchConnectivityService(logStore: phoneLogStore)
+        let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
         let coordinator = SmartWakeCoordinator(
             scheduleEngine: engine,
             watchConnectivity: connectivity,
-            modelContainer: container
+            modelContainer: container,
+            logStore: phoneLogStore
         )
+        let healthKitAuth = HealthKitAuthorizationService(logStore: phoneLogStore)
 
         service.onHomesUpdated = { [weak engine] in
             guard let engine else { return }
@@ -35,21 +43,26 @@ struct Lights_TimerApp: App {
             }
         }
 
+        _phoneLogStore = State(initialValue: phoneLogStore)
         _homeKitService = State(initialValue: service)
         _lightController = State(initialValue: controller)
         _scheduleEngine = State(initialValue: engine)
         _watchConnectivity = State(initialValue: connectivity)
         _smartWakeCoordinator = State(initialValue: coordinator)
+        _healthKitAuth = State(initialValue: healthKitAuth)
         _watchLogArchive = State(initialValue: watchLogArchive)
 
         connectivity.onWatchLogFileReceived = { [weak watchLogArchive] fileURL, metadata in
             watchLogArchive?.importTransferredLog(from: fileURL, metadata: metadata)
         }
+
+        phoneLogStore.log("APP", "Lights Timer iPhone app initialized")
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(phoneLogStore)
                 .environment(homeKitService)
                 .environment(scheduleEngine)
                 .environment(watchConnectivity)

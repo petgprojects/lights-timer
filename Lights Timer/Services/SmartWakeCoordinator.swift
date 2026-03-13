@@ -11,6 +11,7 @@ final class SmartWakeCoordinator {
     private let scheduleEngine: ScheduleEngine
     private let watchConnectivity: WatchConnectivityService
     private let modelContainer: ModelContainer
+    private let logStore: PhoneLogStore
 
     private var firedToday: [UUID: Date] = [:]
     private var processedHandoffs: [UUID: ProcessedHandoffRecord] = [:]
@@ -23,10 +24,16 @@ final class SmartWakeCoordinator {
     var lastTriggerResult: String?
     var lastLightRampOwner: String?
 
-    init(scheduleEngine: ScheduleEngine, watchConnectivity: WatchConnectivityService, modelContainer: ModelContainer) {
+    init(
+        scheduleEngine: ScheduleEngine,
+        watchConnectivity: WatchConnectivityService,
+        modelContainer: ModelContainer,
+        logStore: PhoneLogStore
+    ) {
         self.scheduleEngine = scheduleEngine
         self.watchConnectivity = watchConnectivity
         self.modelContainer = modelContainer
+        self.logStore = logStore
 
         watchConnectivity.onSmartWakeTrigger = { [weak self] trigger in
             guard let self else { return }
@@ -46,12 +53,16 @@ final class SmartWakeCoordinator {
                 await self.handleTestTrigger(trigger)
             }
         }
+
+        log("Smart wake coordinator initialized")
     }
 
     // MARK: - Trigger Handling
 
     func handleTrigger(_ trigger: SmartWakeTriggerPayload) async {
-        print("[SmartWakeCoordinator] Trigger received \(trigger.triggerID) for schedule \(trigger.scheduleID), confidence: \(trigger.confidence)")
+        log(
+            "Trigger received \(trigger.triggerID) for schedule \(trigger.scheduleID), confidence=\(trigger.confidence), heartRate=\(trigger.heartRateAtTrigger.map { String(format: "%.1f", $0) } ?? "n/a"), motion=\(trigger.motionLevel.map { String(format: "%.2f", $0) } ?? "n/a")"
+        )
 
         pruneProcessedHandoffs()
 
@@ -59,6 +70,9 @@ final class SmartWakeCoordinator {
             watchConnectivity.sendLightHandoff(existingHandoff)
             lastTriggerResult = "Duplicate trigger ignored"
             lastLightRampOwner = existingHandoff.phoneWillHandleLights ? "Phone" : "Watch"
+            log(
+                "Duplicate trigger \(trigger.triggerID); resent cached handoff phoneWillHandleLights=\(existingHandoff.phoneWillHandleLights)"
+            )
             return
         }
 
@@ -98,6 +112,10 @@ final class SmartWakeCoordinator {
                 rejectTrigger(trigger, scheduleID: schedule.id, reason: "Outside wake window")
                 return
             }
+
+            log(
+                "Matched trigger \(trigger.triggerID) to '\(schedule.name)' wake=\(formatTimestamp(occurrence.wakeUpTime)) windowStart=\(formatTimestamp(occurrence.windowStart))"
+            )
 
             if let firedOccurrence = firedToday[schedule.id],
                Calendar.current.isDate(firedOccurrence, inSameDayAs: occurrence.wakeUpTime) {
@@ -145,7 +163,7 @@ final class SmartWakeCoordinator {
         )
         lastTriggerResult = reason
         lastLightRampOwner = "Rejected"
-        print("[SmartWakeCoordinator] Rejected trigger \(trigger.triggerID): \(reason)")
+        log("Rejected trigger \(trigger.triggerID): \(reason)", level: .warning)
     }
 
     private func acceptWatchFallback(
@@ -161,7 +179,7 @@ final class SmartWakeCoordinator {
         )
         lastTriggerResult = "Watch fallback at \(formatTime(trigger.triggerDate)): \(reason)"
         lastLightRampOwner = "Watch"
-        print("[SmartWakeCoordinator] Watch fallback for trigger \(trigger.triggerID): \(reason)")
+        log("Watch fallback for trigger \(trigger.triggerID): \(reason)", level: .warning)
     }
 
     private func sendHandoff(
@@ -181,6 +199,9 @@ final class SmartWakeCoordinator {
             createdAt: Date()
         )
         pruneProcessedHandoffs()
+        log(
+            "Sending handoff for trigger \(triggerID): phoneWillHandleLights=\(phoneWillHandleLights), reason=\(reason ?? "none")"
+        )
         watchConnectivity.sendLightHandoff(payload)
     }
 
@@ -227,16 +248,16 @@ final class SmartWakeCoordinator {
             let descriptor = FetchDescriptor<LightSchedule>()
             let schedules = try context.fetch(descriptor)
             guard let schedule = schedules.first(where: { $0.id == payload.scheduleID }) else {
-                print("[SmartWakeCoordinator] Schedule not found for haptic change")
+                log("Schedule not found for haptic change", level: .warning)
                 return
             }
 
             schedule.hapticPatternRaw = payload.hapticPatternRaw
             try context.save()
-            print("[SmartWakeCoordinator] Updated haptic pattern to '\(payload.hapticPatternRaw)' for '\(schedule.name)'")
+            log("Updated haptic pattern to '\(payload.hapticPatternRaw)' for '\(schedule.name)'")
             syncSchedulesToWatch(modelContext: context)
         } catch {
-            print("[SmartWakeCoordinator] Failed to update haptic pattern: \(error)")
+            log("Failed to update haptic pattern: \(error)", level: .error)
         }
     }
 
@@ -244,6 +265,7 @@ final class SmartWakeCoordinator {
 
     private func handleTestTrigger(_ trigger: SmartWakeTriggerPayload) async {
         let context = ModelContext(modelContainer)
+        log("Received test trigger \(trigger.triggerID) for schedule \(trigger.scheduleID)")
 
         do {
             let descriptor = FetchDescriptor<LightSchedule>()
@@ -270,13 +292,16 @@ final class SmartWakeCoordinator {
             case .phoneCommitted:
                 lastTriggerResult = "Test ramp started on phone for '\(schedule.name)'"
                 lastLightRampOwner = "Phone (test)"
+                log("Test trigger \(trigger.triggerID) started phone ramp for '\(schedule.name)'")
             case .watchFallback(let reason):
                 lastTriggerResult = "Test phone ramp failed: \(reason)"
                 lastLightRampOwner = "Watch (test fallback)"
+                log("Test trigger \(trigger.triggerID) fell back to watch: \(reason)", level: .warning)
             }
         } catch {
             lastTriggerResult = "Test error: \(error.localizedDescription)"
             lastLightRampOwner = "Rejected"
+            log("Test trigger \(trigger.triggerID) failed: \(error.localizedDescription)", level: .error)
         }
     }
 
@@ -292,8 +317,9 @@ final class SmartWakeCoordinator {
                 .filter(\.usesSmartWake)
                 .map { WatchScheduleSnapshot(from: $0) }
             watchConnectivity.sendSchedules(snapshots)
+            log("Synced \(snapshots.count) smart wake schedule(s) to watch")
         } catch {
-            print("[SmartWakeCoordinator] Failed to sync schedules: \(error)")
+            log("Failed to sync schedules: \(error)", level: .error)
         }
     }
 
@@ -306,7 +332,7 @@ final class SmartWakeCoordinator {
             motionLevel: 0.6
         )
         await handleTrigger(trigger)
-        print("[SmartWakeCoordinator] Simulated trigger for '\(schedule.name)'")
+        log("Simulated trigger for '\(schedule.name)'")
     }
 
     // MARK: - Cleanup
@@ -314,8 +340,13 @@ final class SmartWakeCoordinator {
     func resetDailyState() {
         let calendar = Calendar.current
         let today = Date()
+        let previousCount = firedToday.count
         firedToday = firedToday.filter { _, occurrenceDate in
             calendar.isDate(occurrenceDate, inSameDayAs: today)
+        }
+        let removedCount = previousCount - firedToday.count
+        if removedCount > 0 {
+            log("Pruned \(removedCount) stale fired-today record(s)")
         }
     }
 
@@ -348,5 +379,16 @@ final class SmartWakeCoordinator {
         for triggerID in oldestTriggerIDs {
             processedHandoffs.removeValue(forKey: triggerID)
         }
+    }
+
+    private func log(_ message: String, level: PhoneLogLevel = .info) {
+        logStore.log("SmartWakeCoordinator", message, level: level)
+    }
+
+    private func formatTimestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
+        formatter.timeZone = .current
+        return formatter.string(from: date)
     }
 }

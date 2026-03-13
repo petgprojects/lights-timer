@@ -4,6 +4,7 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
+    @Environment(PhoneLogStore.self) private var phoneLogStore
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
     @Environment(WatchConnectivityService.self) private var watchConnectivity
@@ -14,7 +15,10 @@ struct ContentView: View {
             ScheduleListView()
         }
         .onChange(of: scenePhase) { _, newPhase in
+            phoneLogStore.log("APP", "Scene phase changed to \(scenePhaseDescription(newPhase))")
+
             if newPhase == .active {
+                phoneLogStore.log("APP", "Refreshing schedules, watch sync, and watch status on active scene")
                 Task {
                     await scheduleEngine.onAppActive(modelContext: modelContext)
                 }
@@ -26,10 +30,24 @@ struct ContentView: View {
                     healthKitAuth.updateFromWatch(authorized: status.healthKitAuthorized)
                 }
                 healthKitAuth.updateFromConnectivity(
-                    watchInstalled: watchConnectivity.isWatchAppInstalled,
+                    watchPaired: watchConnectivity.isWatchPaired,
+                    watchInstalled: watchConnectivity.effectiveWatchAppInstalled,
                     watchReachable: watchConnectivity.isWatchReachable
                 )
             }
+        }
+    }
+
+    private func scenePhaseDescription(_ phase: ScenePhase) -> String {
+        switch phase {
+        case .active:
+            return "active"
+        case .inactive:
+            return "inactive"
+        case .background:
+            return "background"
+        @unknown default:
+            return "unknown"
         }
     }
 }

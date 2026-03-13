@@ -368,9 +368,11 @@ struct ScheduleDetailView: View {
 }
 
 #Preview("Create") {
+    let phoneLogStore = PhoneLogStore()
     NavigationStack {
         ScheduleDetailView()
     }
     .modelContainer(for: LightSchedule.self, inMemory: true)
-    .environment(HomeKitService())
+    .environment(phoneLogStore)
+    .environment(HomeKitService(logStore: phoneLogStore))
 }

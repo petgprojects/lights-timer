@@ -3,6 +3,7 @@ import SwiftData
 
 struct ScheduleListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(PhoneLogStore.self) private var phoneLogStore
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
     @Environment(WatchConnectivityService.self) private var watchConnectivity
@@ -48,6 +49,12 @@ struct ScheduleListView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.orange)
+
+            NavigationLink {
+                PhoneLogArchiveView()
+            } label: {
+                Text("Phone Logs")
+            }
 
             NavigationLink {
                 WatchLogArchiveView()
@@ -126,6 +133,51 @@ struct ScheduleListView: View {
             }
             .onDelete(perform: deleteSchedules)
 
+            Section("Phone Logs") {
+                NavigationLink {
+                    PhoneLogArchiveView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Saved Phone Logs")
+                        Text(phoneLogStore.captureStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let runtimeLog = phoneLogStore.runtimeLogFile {
+                    ShareLink(item: runtimeLog.url) {
+                        Label("Share Runtime Log", systemImage: "square.and.arrow.up")
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(runtimeLog.displayName)
+                            .font(.caption)
+                        Text("\(formatLogDate(runtimeLog.modifiedAt)) • \(runtimeLog.sizeDescription)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let latestLaunchLog = phoneLogStore.latestLaunchLog {
+                    ShareLink(item: latestLaunchLog.url) {
+                        Label("Share Latest Launch Log", systemImage: "doc.text")
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(latestLaunchLog.displayName)
+                            .font(.caption)
+                        Text("\(formatLogDate(latestLaunchLog.modifiedAt)) • \(latestLaunchLog.sizeDescription)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("No iPhone launch log has been recorded yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Watch Logs") {
                 NavigationLink {
                     WatchLogArchiveView()
@@ -146,7 +198,7 @@ struct ScheduleListView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(latestLog.displayName)
                             .font(.caption)
-                        Text("\(formatWatchLogDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
+                        Text("\(formatLogDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -187,10 +239,10 @@ struct ScheduleListView: View {
                     Text("Watch")
                         .font(.caption)
                     Spacer()
-                    Image(systemName: watchConnectivity.isWatchReachable ? "checkmark.circle.fill" : "xmark.circle")
-                        .foregroundStyle(watchConnectivity.isWatchReachable ? .green : .red)
+                    Image(systemName: watchStatusSymbolName)
+                        .foregroundStyle(watchStatusColor)
                         .imageScale(.small)
-                    Text(watchConnectivity.isWatchAppInstalled ? "Installed" : "Not installed")
+                    Text(watchStatusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -271,11 +323,44 @@ struct ScheduleListView: View {
         smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
     }
 
-    private func formatWatchLogDate(_ date: Date) -> String {
+    private func formatLogDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    private var watchStatusSymbolName: String {
+        if watchConnectivity.isWatchReachable {
+            return "checkmark.circle.fill"
+        }
+        if watchConnectivity.effectiveWatchAppInstalled {
+            return "exclamationmark.circle.fill"
+        }
+        return "xmark.circle"
+    }
+
+    private var watchStatusColor: Color {
+        if watchConnectivity.isWatchReachable {
+            return .green
+        }
+        if watchConnectivity.effectiveWatchAppInstalled {
+            return .orange
+        }
+        return .red
+    }
+
+    private var watchStatusText: String {
+        if watchConnectivity.isWatchReachable {
+            return "Connected"
+        }
+        if watchConnectivity.effectiveWatchAppInstalled {
+            return "Installed, not reachable"
+        }
+        if watchConnectivity.isWatchPaired {
+            return "Not installed"
+        }
+        return "No paired watch"
     }
 
     #if DEBUG
@@ -301,20 +386,34 @@ struct ScheduleListView: View {
 }
 
 #Preview {
-    let service = HomeKitService()
-    let connectivity = WatchConnectivityService()
+    let phoneLogStore = PhoneLogStore()
+    let service = HomeKitService(logStore: phoneLogStore)
+    let connectivity = WatchConnectivityService(logStore: phoneLogStore)
     let engine = ScheduleEngine(
         homeKitService: service,
-        lightController: LightController(homeKitService: service)
+        lightController: LightController(
+            homeKitService: service,
+            logStore: phoneLogStore
+        ),
+        logStore: phoneLogStore
     )
     let container = try! ModelContainer(for: LightSchedule.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+    let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
     NavigationStack {
         ScheduleListView()
     }
     .modelContainer(container)
+    .environment(phoneLogStore)
     .environment(service)
     .environment(engine)
-    .environment(SmartWakeCoordinator(scheduleEngine: engine, watchConnectivity: connectivity, modelContainer: container))
+    .environment(
+        SmartWakeCoordinator(
+            scheduleEngine: engine,
+            watchConnectivity: connectivity,
+            modelContainer: container,
+            logStore: phoneLogStore
+        )
+    )
     .environment(connectivity)
-    .environment(WatchLogArchiveService())
+    .environment(watchLogArchive)
 }
