@@ -286,9 +286,10 @@ struct ScheduleListView: View {
                         Text("--")
                             .font(.caption)
                             .foregroundStyle(.quaternary)
-                        Label("Smart Wake", systemImage: "applewatch")
+                        Image(systemName: "applewatch")
                             .font(.caption)
                             .foregroundStyle(.blue)
+                            .accessibilityLabel("Smart Wake")
                     }
                 }
             }
