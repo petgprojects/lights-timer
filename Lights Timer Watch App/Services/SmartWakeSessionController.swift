@@ -104,8 +104,13 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func queueActiveLogTransfer() {
-        guard let logURL = logStore.activeLogFile?.url else { return }
-        onLogReadyToTransfer?(logURL)
+        if let runtimeLogURL = logStore.runtimeLogFile?.url {
+            onLogReadyToTransfer?(runtimeLogURL)
+        }
+        if let logURL = logStore.activeLogFile?.url,
+           logURL != logStore.runtimeLogFile?.url {
+            onLogReadyToTransfer?(logURL)
+        }
     }
 
     private func formatTimestamp(_ date: Date?) -> String {

@@ -203,21 +203,21 @@ struct WatchRootView: View {
                 WatchLogArchiveView()
             }
 
-            if let latestLog = logStore.latestLog {
-                ShareLink(item: latestLog.url) {
-                    Label("Share Latest Log", systemImage: "square.and.arrow.up")
+            if let runtimeLog = logStore.runtimeLogFile {
+                ShareLink(item: runtimeLog.url) {
+                    Label("Share Runtime Log", systemImage: "square.and.arrow.up")
                 }
 
                 Button {
-                    sessionManager.transferLogFile(latestLog.url)
+                    sessionManager.transferLogFile(runtimeLog.url)
                 } label: {
-                    Label("Send Latest Log To iPhone", systemImage: "iphone")
+                    Label("Send Runtime Log To iPhone", systemImage: "iphone")
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(latestLog.displayName)
+                    Text(runtimeLog.displayName)
                         .font(.caption2)
-                    Text("\(formatLogDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
+                    Text("\(formatLogDate(runtimeLog.modifiedAt)) • \(runtimeLog.sizeDescription)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -225,6 +225,18 @@ struct WatchRootView: View {
                 Text("No watch logs yet")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+
+            if let latestSessionLog = logStore.latestSessionLog {
+                ShareLink(item: latestSessionLog.url) {
+                    Label("Share Latest Session Log", systemImage: "doc.text")
+                }
+
+                Button {
+                    sessionManager.transferLogFile(latestSessionLog.url)
+                } label: {
+                    Label("Send Session Log To iPhone", systemImage: "iphone.gen3")
+                }
             }
 
             LabeledContent("iPhone Export") {

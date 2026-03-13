@@ -75,14 +75,14 @@ Models/
 
 Views/
   WatchRootView.swift              Status, schedule list, diagnostics, permission prompt, and log export shortcuts
-  WatchLogArchiveView.swift        Watch-side viewer/share UI for saved smart-wake log files
+  WatchLogArchiveView.swift        Watch-side viewer/share UI for the always-on runtime log plus saved smart-wake session logs
 
 Services/
   WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, sends triggers, and transfers log files to iPhone
   SmartWakeSessionController.swift @Observable NSObject, live HR monitoring + best-effort historical seeding, deferred watch-local HomeKit fallback modes, handoff tracking, and detailed smart-wake file logging
   SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, schedules overnight wake monitoring with `start(at:)`, and prepares per-session log files once the next wake is known
   WakeHeuristicEngine.swift        @Observable, frozen pre-window HR baseline, confidence scoring, trigger decision, and detailed baseline/evaluation diagnostics for the log file
-  SmartWakeLogStore.swift          @Observable, persists per-session watch log files in Application Support, keeps recent log metadata, and tracks export status
+  SmartWakeLogStore.swift          @Observable, persists an always-on watch runtime log plus per-session smart-wake log files in Application Support, keeps recent log metadata, and tracks export status
 
 Lights_Timer_Watch.entitlements    HealthKit + HomeKit
 Lights-Timer-Watch-App-Info.plist  Watch Info.plist, NSHomeKitUsageDescription, WKBackgroundModes
@@ -190,15 +190,18 @@ WatchLogArchiveService            (all injected as @Environment)
 10. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the wake.
 
 ### Persistent Smart Wake Logs
-1. `SmartWakeLogStore` writes timestamped text logs to the watch app’s Application Support directory, one file per schedule occurrence.
+1. `SmartWakeLogStore` writes timestamped text logs to the watch app’s Application Support directory:
+   - `smartwake-runtime.log` records all app-generated watch logs from launch onward
+   - one per-schedule-occurrence session log records the focused overnight wake path
 2. Log lines use ISO-8601 timestamps with fractional seconds and local timezone offset so overnight ordering is unambiguous.
-3. The watch keeps recent log metadata in memory for UI access and retains up to 14 log files on disk.
-4. `WatchRootView` exposes three retrieval paths:
+3. The same log call writes to disk and mirrors to the Xcode console, so app-generated console output and saved log output stay aligned.
+4. The watch keeps recent session-log metadata in memory for UI access and retains up to 14 session log files on disk, plus the runtime log.
+5. `WatchRootView` exposes retrieval paths for both the runtime log and the latest session log:
    - open logs directly on the watch
-   - share the latest log from the watch share sheet
-   - queue the latest log for paired-iPhone transfer
-5. `WatchSessionManager.transferLogFile` uses `WCSession.transferFile` with metadata naming the log file.
-6. `WatchLogArchiveService` stores incoming files on the iPhone and `WatchLogArchiveView` lets the user read/share them later.
+   - share logs from the watch share sheet
+   - queue logs for paired-iPhone transfer
+6. `WatchSessionManager.transferLogFile` uses `WCSession.transferFile` with metadata naming the log file.
+7. `WatchLogArchiveService` stores incoming files on the iPhone and `WatchLogArchiveView` lets the user read/share them later.
 
 ### Duplicate Prevention
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
@@ -265,7 +268,7 @@ WatchLogArchiveService            (all injected as @Environment)
 - Status section: session state icon/color/title/subtitle, health access button
 - Smart Wake Schedules section: list from `WatchSessionManager.activeSchedules`
 - Diagnostics section: heuristic summary, next scheduled wake window, baseline readiness/BPM/sample count, phone handoff status, deferred watch fallback status, phone reachability, error messages, stop button
-- Logs section: latest saved log metadata, watch-side log viewer navigation, share shortcut, and “Send Latest Log To iPhone” action
+- Logs section: runtime-log metadata, session-log export shortcuts, watch-side log viewer navigation, and iPhone transfer actions
 
 ## Build And Project Notes
 
@@ -364,7 +367,7 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 - Foreground ramp (`Timer.publish`) only ticks while app is in foreground. Background relies on HomeKit timer-triggered scenes.
 - Phone-side smart wake only acks after an initial ownership write, but later ramp steps still depend on background execution time; if the phone loses execution after claiming the lights, the already-written state plus the exact wake-time scene remain the backstops.
 - If the watch cannot resolve the chosen lights by UUID, it falls back to `lightNames`; if both fail, the phone may already have declined ownership and the exact wake-time fallback scene becomes the safety net.
-- Automatic watch→phone log transfer only happens when the watch explicitly queues a file (for example after a completed/failed watch-owned wake path or when the user taps “Send Latest Log To iPhone”); a scheduler-only log with no later session activity may still require manual export from the watch.
+- Automatic watch→phone log transfer only happens when the watch explicitly queues files (for example after a completed/failed watch-owned wake path or when the user taps a send action in the Logs section); if you want the most complete picture, export the runtime log.
 - Watch `WKExtendedRuntimeSession` (alarm type) + `HKWorkoutSession` consume battery — extended session starts up to 2 hours before wake, HR monitoring starts up to 1 hour before wake window.
 - The extended runtime session still must be scheduled while the watch app is awake or receiving WCSession delivery. `WatchSessionManager.onSchedulesUpdated` and cached iPhone schedule sync retries reduce this risk, but they do not eliminate watchOS scheduling limits.
 - SwiftData model changes (adding/removing fields) may require migration handling for existing user data.

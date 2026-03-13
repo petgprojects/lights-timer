@@ -5,19 +5,22 @@ struct WatchLogArchiveView: View {
 
     var body: some View {
         List {
-            if let latestLog = logStore.latestLog {
-                Section("Latest Log") {
+            if let runtimeLog = logStore.runtimeLogFile {
+                Section("Runtime Log") {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(latestLog.displayName)
+                        Text(runtimeLog.displayName)
                             .font(.caption)
-                        Text("\(formatDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
+                        Text("\(formatDate(runtimeLog.modifiedAt)) • \(runtimeLog.sizeDescription)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                    }
+                    NavigationLink("Open Runtime Log") {
+                        WatchLogDetailView(logFile: runtimeLog)
                     }
                 }
             }
 
-            Section("Saved Logs") {
+            Section("Saved Session Logs") {
                 if logStore.availableLogs.isEmpty {
                     Text("No watch logs yet")
                         .foregroundStyle(.secondary)

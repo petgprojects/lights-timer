@@ -27,11 +27,13 @@ enum SmartWakeLogLevel: String {
 final class SmartWakeLogStore {
     private(set) var availableLogs: [SmartWakeLogFile] = []
     private(set) var activeLogFile: SmartWakeLogFile?
+    private(set) var runtimeLogFile: SmartWakeLogFile?
     private(set) var lastTransferStatus = "No log transfer yet"
 
     private let fileManager = FileManager.default
     private let logsDirectoryURL: URL
     private let retainedLogLimit = 14
+    private let runtimeLogFileName = "smartwake-runtime.log"
 
     private var activeSessionKey: String?
 
@@ -59,10 +61,15 @@ final class SmartWakeLogStore {
 
         ensureLogsDirectory()
         refreshAvailableLogs()
+        log("APP", "SmartWakeLogStore initialized")
     }
 
     var latestLog: SmartWakeLogFile? {
         availableLogs.first
+    }
+
+    var latestSessionLog: SmartWakeLogFile? {
+        availableLogs.first(where: { $0.fileName != runtimeLogFileName })
     }
 
     func prepareSessionLog(
@@ -105,9 +112,16 @@ final class SmartWakeLogStore {
     }
 
     func log(_ category: String, _ message: String, level: SmartWakeLogLevel = .info) {
-        guard let logURL = activeLogFile?.url else { return }
-        writeLog(category: category, message: message, level: level, logURL: logURL)
-        refreshAvailableLogs(selecting: logURL)
+        let line = makeLogLine(category: category, message: message, level: level)
+        let runtimeURL = logsDirectoryURL.appendingPathComponent(runtimeLogFileName)
+        write(line, to: runtimeURL, append: true)
+
+        if let activeLogURL = activeLogFile?.url, activeLogURL != runtimeURL {
+            write(line, to: activeLogURL, append: true)
+        }
+
+        print(line, terminator: "")
+        refreshAvailableLogs(selecting: activeLogFile?.url ?? runtimeURL)
     }
 
     func latestLogContents() -> String {
@@ -150,7 +164,7 @@ final class SmartWakeLogStore {
             options: [.skipsHiddenFiles]
         )) ?? []
 
-        availableLogs = logURLs
+        let allLogs = logURLs
             .filter { $0.pathExtension == "log" }
             .compactMap(makeLogFile(from:))
             .sorted { lhs, rhs in
@@ -160,10 +174,13 @@ final class SmartWakeLogStore {
                 return lhs.modifiedAt > rhs.modifiedAt
             }
 
+        runtimeLogFile = allLogs.first(where: { $0.fileName == runtimeLogFileName })
+        availableLogs = allLogs.filter { $0.fileName != runtimeLogFileName }
+
         if let selectedURL {
-            activeLogFile = availableLogs.first(where: { $0.url == selectedURL })
+            activeLogFile = (availableLogs + (runtimeLogFile.map { [$0] } ?? [])).first(where: { $0.url == selectedURL })
         } else if let currentURL = activeLogFile?.url {
-            activeLogFile = availableLogs.first(where: { $0.url == currentURL })
+            activeLogFile = (availableLogs + (runtimeLogFile.map { [$0] } ?? [])).first(where: { $0.url == currentURL })
         } else {
             activeLogFile = availableLogs.first
         }
@@ -213,8 +230,16 @@ final class SmartWakeLogStore {
         level: SmartWakeLogLevel,
         logURL: URL
     ) {
-        let line = "\(formatTimestamp(Date())) [\(level.rawValue)] [\(category)] \(message)\n"
+        let line = makeLogLine(category: category, message: message, level: level)
         write(line, to: logURL, append: true)
+    }
+
+    private func makeLogLine(
+        category: String,
+        message: String,
+        level: SmartWakeLogLevel
+    ) -> String {
+        "\(formatTimestamp(Date())) [\(level.rawValue)] [\(category)] \(message)\n"
     }
 
     private func write(_ string: String, to url: URL, append: Bool) {
