@@ -3,11 +3,8 @@ import SwiftData
 
 struct ScheduleListView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(PhoneLogStore.self) private var phoneLogStore
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
-    @Environment(WatchConnectivityService.self) private var watchConnectivity
-    @Environment(WatchLogArchiveService.self) private var watchLogArchive
     @Query(sort: \LightSchedule.createdAt) private var schedules: [LightSchedule]
     @State private var showingNewSchedule = false
 
@@ -21,6 +18,15 @@ struct ScheduleListView: View {
         }
         .navigationTitle("Lights Timer")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NavigationLink {
+                    SettingsView()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showingNewSchedule = true
@@ -49,18 +55,6 @@ struct ScheduleListView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.orange)
-
-            NavigationLink {
-                PhoneLogArchiveView()
-            } label: {
-                Text("Phone Logs")
-            }
-
-            NavigationLink {
-                WatchLogArchiveView()
-            } label: {
-                Text("Watch Logs")
-            }
         }
     }
 
@@ -132,122 +126,6 @@ struct ScheduleListView: View {
                 }
             }
             .onDelete(perform: deleteSchedules)
-
-            Section("Phone Logs") {
-                NavigationLink {
-                    PhoneLogArchiveView()
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Saved Phone Logs")
-                        Text(phoneLogStore.captureStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let runtimeLog = phoneLogStore.runtimeLogFile {
-                    ShareLink(item: runtimeLog.url) {
-                        Label("Share Runtime Log", systemImage: "square.and.arrow.up")
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(runtimeLog.displayName)
-                            .font(.caption)
-                        Text("\(formatLogDate(runtimeLog.modifiedAt)) • \(runtimeLog.sizeDescription)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let latestLaunchLog = phoneLogStore.latestLaunchLog {
-                    ShareLink(item: latestLaunchLog.url) {
-                        Label("Share Latest Launch Log", systemImage: "doc.text")
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(latestLaunchLog.displayName)
-                            .font(.caption)
-                        Text("\(formatLogDate(latestLaunchLog.modifiedAt)) • \(latestLaunchLog.sizeDescription)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("No iPhone launch log has been recorded yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Watch Logs") {
-                NavigationLink {
-                    WatchLogArchiveView()
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Imported Watch Logs")
-                        Text(watchLogArchive.lastImportStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if let latestLog = watchLogArchive.latestLog {
-                    ShareLink(item: latestLog.url) {
-                        Label("Share Latest Log", systemImage: "square.and.arrow.up")
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(latestLog.displayName)
-                            .font(.caption)
-                        Text("\(formatLogDate(latestLog.modifiedAt)) • \(latestLog.sizeDescription)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("No watch log has been imported yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            #if DEBUG
-            Section("Smart Wake Debug") {
-                LabeledContent("Last Trigger") {
-                    Text(smartWakeCoordinator.lastTriggerResult ?? "None")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                LabeledContent("Light Owner") {
-                    Text(smartWakeCoordinator.lastLightRampOwner ?? "None")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                LabeledContent("Last Scene Sync") {
-                    Text(backgroundSyncStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                LabeledContent("HomeKit Retry") {
-                    Text(scheduleEngine.hasPendingHomeKitRetry ? "Pending" : "Clear")
-                        .font(.caption)
-                        .foregroundStyle(scheduleEngine.hasPendingHomeKitRetry ? .orange : .secondary)
-                }
-
-                HStack {
-                    Text("Watch")
-                        .font(.caption)
-                    Spacer()
-                    Image(systemName: watchStatusSymbolName)
-                        .foregroundStyle(watchStatusColor)
-                        .imageScale(.small)
-                    Text(watchStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            #endif
         }
     }
 
@@ -323,67 +201,6 @@ struct ScheduleListView: View {
         }
         smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
     }
-
-    private func formatLogDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-
-    private var watchStatusSymbolName: String {
-        if watchConnectivity.isWatchReachable {
-            return "checkmark.circle.fill"
-        }
-        if watchConnectivity.effectiveWatchAppInstalled {
-            return "exclamationmark.circle.fill"
-        }
-        return "xmark.circle"
-    }
-
-    private var watchStatusColor: Color {
-        if watchConnectivity.isWatchReachable {
-            return .green
-        }
-        if watchConnectivity.effectiveWatchAppInstalled {
-            return .orange
-        }
-        return .red
-    }
-
-    private var watchStatusText: String {
-        if watchConnectivity.isWatchReachable {
-            return "Connected"
-        }
-        if watchConnectivity.effectiveWatchAppInstalled {
-            return "Installed, not reachable"
-        }
-        if watchConnectivity.isWatchPaired {
-            return "Not installed"
-        }
-        return "No paired watch"
-    }
-
-    #if DEBUG
-    private var backgroundSyncStatus: String {
-        if let error = scheduleEngine.lastBackgroundSyncError {
-            return error
-        }
-        if let success = scheduleEngine.lastBackgroundSyncSucceededAt {
-            return "Succeeded at \(formatDebugTime(success))"
-        }
-        if let attempt = scheduleEngine.lastBackgroundSyncAttemptAt {
-            return "Attempted at \(formatDebugTime(attempt))"
-        }
-        return "Not attempted"
-    }
-
-    private func formatDebugTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-    #endif
 }
 
 #Preview {

@@ -42,7 +42,8 @@ Models/
   SmartWakeMessage.swift           Codable message types + WCMessageKey constants + HapticPattern enum
 
 Views/
-  ScheduleListView.swift           Schedule list, enable toggle, smart wake badge, debug trigger (swipe right)
+  ScheduleListView.swift           Schedule list, enable toggle, smart wake badge, debug trigger (swipe right), toolbar entry points for add + settings
+  SettingsView.swift               iPhone settings screen with collapsible Phone Logs, Watch Logs, and Smart Wake Debug sections
   ScheduleDetailView.swift         Schedule editor form, smart wake toggle + window stepper + haptic pattern picker
   DayOfWeekSelector.swift          Circular day-of-week picker
   LightPickerView.swift            HomeKit light multi-select
@@ -271,9 +272,12 @@ WatchLogArchiveService            (all injected as @Environment)
 - Enable/disable toggle per row
 - Swipe delete
 - Swipe right on smart-wake schedules: "Test Wake" debug trigger button
-- Phone Logs section: latest phone-log capture status, navigation to `PhoneLogArchiveView`, and share shortcuts for the runtime log + latest launch log
-- Watch Logs section: latest imported watch log status, navigation to `WatchLogArchiveView`, and share shortcut for the newest imported file
-- `#if DEBUG` section: last trigger result, last light owner, last background-scene sync status, pending HomeKit retry flag, and watch connection status
+- Toolbar: leading settings gear, trailing add button
+
+### SettingsView
+- Collapsible `Phone Logs` disclosure section: latest phone-log capture status, navigation to `PhoneLogArchiveView`, and share shortcuts for the runtime log + latest launch log
+- Collapsible `Watch Logs` disclosure section: latest imported watch log status, navigation to `WatchLogArchiveView`, and share shortcut for the newest imported file
+- Collapsible `Smart Wake Debug` disclosure section (`#if DEBUG`): last trigger result, last light owner, last background-scene sync status, pending HomeKit retry flag, and watch connection status
 
 ### ScheduleDetailView
 - Form sections: Name, Wake Up Time (wheel picker), Repeat (day circles), Lights (picker navigation), Lead Time (stepper 5-120 min), **Smart Wake** (toggle + window stepper 10-60 min), Target Brightness (slider), Light Colors (start/end color pickers + gradient)
