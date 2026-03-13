@@ -5,6 +5,24 @@ import HomeKit
 import WatchKit
 #endif
 
+private enum WatchFallbackMode {
+    case earlyRamp
+    case exactWakeFinalState
+}
+
+private struct WatchLightRampPlan {
+    let rampDuration: TimeInterval
+    let stepInterval: TimeInterval
+    let stepCount: Int
+    let firstVisibleStep: Int?
+}
+
+private struct WatchLightState {
+    let brightness: Int
+    let hue: Double
+    let saturation: Double
+}
+
 @Observable
 final class SmartWakeSessionController: NSObject {
     let healthStore = HKHealthStore()
@@ -34,6 +52,7 @@ final class SmartWakeSessionController: NSObject {
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
     private var wakeCheckTimer: Timer?
+    private var historicalSeedTask: Task<Void, Never>?
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
 
@@ -42,6 +61,9 @@ final class SmartWakeSessionController: NSObject {
     private var windowStartTime: Date?
     private var activeTriggerID: UUID?
     private var activeTriggerSchedule: WatchScheduleSnapshot?
+    private var activeTriggerDate: Date?
+    private var activeTriggerWakeUpTime: Date?
+    private var activeTriggerFallbackMode: WatchFallbackMode?
     private var activeLocalRampTriggerID: UUID?
 
     // Haptic alarm
@@ -124,16 +146,14 @@ final class SmartWakeSessionController: NSObject {
         notifyStateChange()
 
         do {
-            async let historicalSeed: Void = seedHistoricalHeartRateSamples(
+            try await startWorkoutSession()
+            startHeartRateQuery(from: Date())
+            startWakeCheckTimer()
+            checkForWakeTrigger()
+            startHistoricalSeed(
                 from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
                 to: Date()
             )
-
-            try await startWorkoutSession()
-            startHeartRateQuery(from: Date())
-            try await historicalSeed
-            startWakeCheckTimer()
-            checkForWakeTrigger()
             print("[SmartWakeSession] Monitoring started for schedule \(schedule.id)")
         } catch {
             failMonitoring("Failed to start session: \(error.localizedDescription)")
@@ -171,6 +191,9 @@ final class SmartWakeSessionController: NSObject {
         activeLocalRampTriggerID = nil
         activeTriggerID = nil
         activeTriggerSchedule = nil
+        activeTriggerDate = nil
+        activeTriggerWakeUpTime = nil
+        activeTriggerFallbackMode = nil
 
         currentSchedule = nil
         currentScheduleID = nil
@@ -196,6 +219,11 @@ final class SmartWakeSessionController: NSObject {
         lightRampTask?.cancel()
         lightRampTask = nil
         activeLocalRampTriggerID = nil
+        activeTriggerID = nil
+        activeTriggerSchedule = nil
+        activeTriggerDate = nil
+        activeTriggerWakeUpTime = nil
+        activeTriggerFallbackMode = nil
 
         currentSchedule = nil
         currentScheduleID = nil
@@ -214,6 +242,9 @@ final class SmartWakeSessionController: NSObject {
     private func tearDownMonitoringSession() {
         wakeCheckTimer?.invalidate()
         wakeCheckTimer = nil
+
+        historicalSeedTask?.cancel()
+        historicalSeedTask = nil
 
         if let query = heartRateQuery {
             healthStore.stop(query)
@@ -236,7 +267,7 @@ final class SmartWakeSessionController: NSObject {
 
         if payload.phoneWillHandleLights {
             guard activeLocalRampTriggerID == nil else {
-                deferredLocalRampStatus = "Watch ramp already started before ack"
+                deferredLocalRampStatus = "Watch fallback already started before ack"
                 return
             }
 
@@ -251,15 +282,17 @@ final class SmartWakeSessionController: NSObject {
         deferredLightRampTask = nil
 
         guard activeLocalRampTriggerID == nil,
-              let schedule = activeTriggerSchedule else {
+              let schedule = activeTriggerSchedule,
+              let fallbackMode = activeTriggerFallbackMode else {
             return
         }
 
         deferredLocalRampStatus = "Starting immediately after phone decline"
-        _ = startLocalLightRamp(
+        _ = startLocalLightFallback(
             for: schedule,
             triggerID: payload.triggerID,
-            reason: "phone declined"
+            reason: "phone declined",
+            mode: fallbackMode
         )
     }
 
@@ -299,8 +332,30 @@ final class SmartWakeSessionController: NSObject {
 
     // MARK: - Heart Rate Query
 
+    private func startHistoricalSeed(from startDate: Date, to endDate: Date) {
+        historicalSeedTask?.cancel()
+        historicalSeedTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.seedHistoricalHeartRateSamples(from: startDate, to: endDate)
+            } catch is CancellationError {
+                return
+            } catch {
+                await MainActor.run {
+                    print("[SmartWakeSession] Historical HR seed failed: \(error)")
+                }
+            }
+
+            await MainActor.run {
+                self.historicalSeedTask = nil
+            }
+        }
+    }
+
     private func seedHistoricalHeartRateSamples(from startDate: Date, to endDate: Date) async throws {
         let samples = try await fetchHistoricalHeartRateSamples(from: startDate, to: endDate)
+        guard isMonitoringActive else { return }
+
         let bpmUnit = HKUnit.count().unitDivided(by: .minute())
         let mappedSamples = samples.map { sample in
             (date: sample.startDate, bpm: sample.quantity.doubleValue(for: bpmUnit))
@@ -390,7 +445,11 @@ final class SmartWakeSessionController: NSObject {
 
         if now >= wakeUpTime {
             if !heuristicEngine.hasTriggered {
-                fireTrigger(schedule: schedule, confidence: 1.0)
+                fireTrigger(
+                    schedule: schedule,
+                    confidence: 1.0,
+                    fallbackMode: .exactWakeFinalState
+                )
             } else {
                 finishMonitoringAfterTrigger()
             }
@@ -398,26 +457,43 @@ final class SmartWakeSessionController: NSObject {
         }
 
         if heuristicEngine.shouldTrigger(inWakeWindow: now >= windowStartTime, now: now) {
-            fireTrigger(schedule: schedule, confidence: heuristicEngine.currentConfidence)
+            fireTrigger(
+                schedule: schedule,
+                confidence: heuristicEngine.currentConfidence,
+                fallbackMode: .earlyRamp
+            )
         }
     }
 
-    private func fireTrigger(schedule: WatchScheduleSnapshot, confidence: Double) {
+    private func fireTrigger(
+        schedule: WatchScheduleSnapshot,
+        confidence: Double,
+        fallbackMode: WatchFallbackMode
+    ) {
         let triggerDate = Date()
         let triggerID = UUID()
 
         heuristicEngine.markTriggered(at: triggerDate)
         activeTriggerID = triggerID
         activeTriggerSchedule = schedule
+        activeTriggerDate = triggerDate
+        activeTriggerWakeUpTime = wakeUpTime
+        activeTriggerFallbackMode = fallbackMode
         didReceivePhoneHandoffAck = false
         handoffAckStatus = "Waiting for phone handoff"
-        deferredLocalRampStatus = "Deferred watch ramp armed for +8s"
+        deferredLocalRampStatus = fallbackMode == .earlyRamp
+            ? "Deferred watch ramp armed for +8s"
+            : "Deferred watch final-state write armed for +8s"
 
         sessionState = .triggered
         notifyStateChange()
 
         startHapticRamp()
-        scheduleDeferredLocalLightRamp(for: schedule, triggerID: triggerID)
+        scheduleDeferredLocalLightFallback(
+            for: schedule,
+            triggerID: triggerID,
+            mode: fallbackMode
+        )
 
         let payload = SmartWakeTriggerPayload(
             triggerID: triggerID,
@@ -455,12 +531,21 @@ final class SmartWakeSessionController: NSObject {
 
     @discardableResult
     func startTestLights(for schedule: WatchScheduleSnapshot) -> Bool {
-        startLocalLightRamp(for: schedule, triggerID: nil, reason: "manual test")
+        startLocalLightFallback(
+            for: schedule,
+            triggerID: nil,
+            reason: "manual test",
+            mode: .earlyRamp
+        )
     }
 
     // MARK: - HomeKit Lights
 
-    private func scheduleDeferredLocalLightRamp(for schedule: WatchScheduleSnapshot, triggerID: UUID) {
+    private func scheduleDeferredLocalLightFallback(
+        for schedule: WatchScheduleSnapshot,
+        triggerID: UUID,
+        mode: WatchFallbackMode
+    ) {
         deferredLightRampTask?.cancel()
         deferredLightRampTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(self?.watchLightHandoffDelay ?? 8))
@@ -470,11 +555,14 @@ final class SmartWakeSessionController: NSObject {
                       self.activeTriggerID == triggerID,
                       self.activeLocalRampTriggerID == nil else { return }
 
-                self.deferredLocalRampStatus = "Watch ramp started after 8s timeout"
-                _ = self.startLocalLightRamp(
+                self.deferredLocalRampStatus = mode == .earlyRamp
+                    ? "Watch ramp started after 8s timeout"
+                    : "Watch final-state write started after 8s timeout"
+                _ = self.startLocalLightFallback(
                     for: schedule,
                     triggerID: triggerID,
-                    reason: "handoff timeout"
+                    reason: "handoff timeout",
+                    mode: mode
                 )
                 self.deferredLightRampTask = nil
             }
@@ -482,10 +570,11 @@ final class SmartWakeSessionController: NSObject {
     }
 
     @discardableResult
-    private func startLocalLightRamp(
+    private func startLocalLightFallback(
         for schedule: WatchScheduleSnapshot,
         triggerID: UUID?,
-        reason: String
+        reason: String,
+        mode: WatchFallbackMode
     ) -> Bool {
         let identifiers = schedule.lightIdentifiers.compactMap(UUID.init(uuidString:))
         guard !identifiers.isEmpty else {
@@ -494,84 +583,201 @@ final class SmartWakeSessionController: NSObject {
             return false
         }
 
+        let rampPlan = makeWatchLightRampPlan(for: schedule)
+        if mode == .earlyRamp, rampPlan.firstVisibleStep == nil {
+            deferredLocalRampStatus = "No visible watch fallback step"
+            print("[SmartWakeSession] No visible watch fallback step for '\(schedule.name)'")
+            return false
+        }
+
         activeLocalRampTriggerID = triggerID
         deferredLightRampTask?.cancel()
         deferredLightRampTask = nil
         lightRampTask?.cancel()
         lightRampTask = Task { [weak self] in
-            await self?.runLocalLightRamp(
+            await self?.runLocalLightFallback(
                 for: schedule,
                 identifiers: identifiers,
-                reason: reason
+                reason: reason,
+                mode: mode,
+                rampPlan: rampPlan
             )
         }
         return true
     }
 
-    private func runLocalLightRamp(
+    private func runLocalLightFallback(
         for schedule: WatchScheduleSnapshot,
         identifiers: [UUID],
-        reason: String
+        reason: String,
+        mode: WatchFallbackMode,
+        rampPlan: WatchLightRampPlan
     ) async {
         await homeKitService.waitForReady()
 
-        let rampDuration: TimeInterval = 60
-        let stepInterval: TimeInterval = 5
-        let stepCount = max(Int(rampDuration / stepInterval), 1)
+        switch mode {
+        case .earlyRamp:
+            await runEarlyLocalLightRamp(
+                for: schedule,
+                identifiers: identifiers,
+                reason: reason,
+                rampPlan: rampPlan
+            )
+        case .exactWakeFinalState:
+            await applyExactWakeFinalLightState(
+                for: schedule,
+                identifiers: identifiers,
+                reason: reason
+            )
+        }
+    }
 
+    private func runEarlyLocalLightRamp(
+        for schedule: WatchScheduleSnapshot,
+        identifiers: [UUID],
+        reason: String,
+        rampPlan: WatchLightRampPlan
+    ) async {
         deferredLocalRampStatus = "Watch ramp running (\(reason))"
         print("[SmartWakeSession] Starting watch HomeKit ramp for '\(schedule.name)' (\(reason))")
 
-        for step in 0...stepCount {
-            if Task.isCancelled { return }
+        guard let firstVisibleStep = rampPlan.firstVisibleStep else {
+            deferredLocalRampStatus = "No visible watch fallback step"
+            return
+        }
 
-            let progress = min(Double(step) / Double(stepCount), 1.0)
-            let brightness = watchInterpolateBrightness(
-                target: schedule.targetBrightness,
-                progress: progress
-            )
-            let hsb = watchInterpolateHSB(
-                startHue: schedule.startColorHue,
-                startSat: schedule.startColorSaturation,
-                startBri: schedule.startColorBrightness,
-                endHue: schedule.endColorHue,
-                endSat: schedule.endColorSaturation,
-                endBri: schedule.endColorBrightness,
-                progress: progress
-            )
+        let initialState = watchLightState(
+            for: schedule,
+            step: firstVisibleStep,
+            stepCount: rampPlan.stepCount
+        )
+        let initialWrite = await lightController.applyBestEffortToMultipleLights(
+            brightness: initialState.brightness,
+            hue: initialState.hue,
+            saturation: initialState.saturation,
+            powerOn: true,
+            skipColor: schedule.skipColorWrites,
+            identifiers: identifiers,
+            names: schedule.lightNames
+        )
+        guard initialWrite.hadAnySuccess else {
+            deferredLocalRampStatus = "Watch ramp could not claim any lights"
+            print("[SmartWakeSession] Watch fallback could not claim any selected lights")
+            return
+        }
 
-            do {
-                try await lightController.applyToMultipleLights(
-                    brightness: brightness,
-                    hue: hsb.hue * 360.0,
-                    saturation: hsb.saturation * 100.0,
+        if firstVisibleStep < rampPlan.stepCount {
+            for step in (firstVisibleStep + 1)...rampPlan.stepCount {
+                if Task.isCancelled { return }
+
+                let state = watchLightState(
+                    for: schedule,
+                    step: step,
+                    stepCount: rampPlan.stepCount
+                )
+                let stepWrite = await lightController.applyBestEffortToMultipleLights(
+                    brightness: state.brightness,
+                    hue: state.hue,
+                    saturation: state.saturation,
                     powerOn: true,
                     skipColor: schedule.skipColorWrites,
                     identifiers: identifiers,
                     names: schedule.lightNames
                 )
-            } catch {
-                print("[SmartWakeSession] Watch HomeKit write failed at step \(step): \(error)")
-            }
+                if !stepWrite.hadAnySuccess {
+                    print("[SmartWakeSession] Watch HomeKit write did not reach any selected lights at step \(step)")
+                }
 
-            if step < stepCount {
-                try? await Task.sleep(for: .seconds(stepInterval))
+                if step < rampPlan.stepCount {
+                    try? await Task.sleep(for: .seconds(rampPlan.stepInterval))
+                }
             }
         }
 
-        do {
-            try await lightController.applyToMultipleLights(
-                brightness: schedule.targetBrightness,
-                hue: schedule.endColorHue * 360.0,
-                saturation: schedule.endColorSaturation * 100.0,
-                powerOn: true,
-                skipColor: schedule.skipColorWrites,
-                identifiers: identifiers,
-                names: schedule.lightNames
-            )
-        } catch {
-            print("[SmartWakeSession] Watch HomeKit final write failed: \(error)")
+        let finalWrite = await lightController.applyBestEffortToMultipleLights(
+            brightness: schedule.targetBrightness,
+            hue: schedule.endColorHue * 360.0,
+            saturation: schedule.endColorSaturation * 100.0,
+            powerOn: true,
+            skipColor: schedule.skipColorWrites,
+            identifiers: identifiers,
+            names: schedule.lightNames
+        )
+        if finalWrite.hadAnySuccess {
+            deferredLocalRampStatus = "Watch ramp completed (\(reason))"
+        } else {
+            deferredLocalRampStatus = "Watch ramp finished without reaching lights"
+            print("[SmartWakeSession] Watch HomeKit final write failed for every selected light")
         }
+    }
+
+    private func applyExactWakeFinalLightState(
+        for schedule: WatchScheduleSnapshot,
+        identifiers: [UUID],
+        reason: String
+    ) async {
+        deferredLocalRampStatus = "Applying watch final light state (\(reason))"
+        print("[SmartWakeSession] Applying watch final light state for '\(schedule.name)' (\(reason))")
+
+        let finalWrite = await lightController.applyBestEffortToMultipleLights(
+            brightness: schedule.targetBrightness,
+            hue: schedule.endColorHue * 360.0,
+            saturation: schedule.endColorSaturation * 100.0,
+            powerOn: true,
+            skipColor: schedule.skipColorWrites,
+            identifiers: identifiers,
+            names: schedule.lightNames
+        )
+        if finalWrite.hadAnySuccess {
+            deferredLocalRampStatus = "Watch final light state applied (\(reason))"
+        } else {
+            deferredLocalRampStatus = "Watch final light state failed"
+            print("[SmartWakeSession] Watch final light state failed for every selected light")
+        }
+    }
+
+    private func makeWatchLightRampPlan(for schedule: WatchScheduleSnapshot) -> WatchLightRampPlan {
+        let rampDuration: TimeInterval = 60
+        let stepInterval: TimeInterval = 5
+        let stepCount = max(Int(rampDuration / stepInterval), 1)
+        let firstVisibleStep = (0...stepCount).first(where: { step in
+            let progress = min(Double(step) / Double(stepCount), 1.0)
+            return watchInterpolateBrightness(target: schedule.targetBrightness, progress: progress) > 0
+        })
+
+        return WatchLightRampPlan(
+            rampDuration: rampDuration,
+            stepInterval: stepInterval,
+            stepCount: stepCount,
+            firstVisibleStep: firstVisibleStep
+        )
+    }
+
+    private func watchLightState(
+        for schedule: WatchScheduleSnapshot,
+        step: Int,
+        stepCount: Int
+    ) -> WatchLightState {
+        let progress = min(Double(step) / Double(stepCount), 1.0)
+        let brightness = watchInterpolateBrightness(
+            target: schedule.targetBrightness,
+            progress: progress
+        )
+        let hsb = watchInterpolateHSB(
+            startHue: schedule.startColorHue,
+            startSat: schedule.startColorSaturation,
+            startBri: schedule.startColorBrightness,
+            endHue: schedule.endColorHue,
+            endSat: schedule.endColorSaturation,
+            endBri: schedule.endColorBrightness,
+            progress: progress
+        )
+
+        return WatchLightState(
+            brightness: brightness,
+            hue: hsb.hue * 360.0,
+            saturation: hsb.saturation * 100.0
+        )
     }
 
     // MARK: - Haptic Alarm (WKInterfaceDevice)
@@ -842,6 +1048,14 @@ private enum WatchHomeKitServiceError: LocalizedError {
     }
 }
 
+private struct WatchMultiLightWriteSummary {
+    let attempted: Int
+    let succeeded: Int
+
+    var failed: Int { attempted - succeeded }
+    var hadAnySuccess: Bool { succeeded > 0 }
+}
+
 private final class WatchLightController {
     private let homeKitService: WatchHomeKitService
 
@@ -862,66 +1076,102 @@ private final class WatchLightController {
             for (index, id) in identifiers.enumerated() {
                 let accessoryName = names.indices.contains(index) ? names[index] : nil
                 group.addTask {
-                    guard powerOn else {
-                        try await self.homeKitService.setPowerState(
-                            false,
-                            for: id,
-                            named: accessoryName
-                        )
-                        return
-                    }
-
-                    if brightness <= 0 {
-                        try? await self.homeKitService.setBrightness(
-                            0,
-                            for: id,
-                            named: accessoryName
-                        )
-                        try await self.homeKitService.setPowerState(
-                            false,
-                            for: id,
-                            named: accessoryName
-                        )
-                        return
-                    }
-
-                    try? await self.homeKitService.setBrightness(
-                        brightness,
-                        for: id,
-                        named: accessoryName
-                    )
-
-                    if !skipColor {
-                        do {
-                            try await self.homeKitService.setHue(
-                                hue,
-                                for: id,
-                                named: accessoryName
-                            )
-                            try await self.homeKitService.setSaturation(
-                                saturation,
-                                for: id,
-                                named: accessoryName
-                            )
-                        } catch WatchHomeKitServiceError.characteristicNotFound {
-                            // White-only bulbs do not expose hue/saturation.
-                        }
-                    }
-
-                    try await self.homeKitService.setPowerState(
-                        true,
-                        for: id,
-                        named: accessoryName
-                    )
-                    try await self.homeKitService.setBrightness(
-                        brightness,
-                        for: id,
+                    try await self.applyLightState(
+                        brightness: brightness,
+                        hue: hue,
+                        saturation: saturation,
+                        powerOn: powerOn,
+                        skipColor: skipColor,
+                        to: id,
                         named: accessoryName
                     )
                 }
             }
             try await group.waitForAll()
         }
+    }
+
+    func applyBestEffortToMultipleLights(
+        brightness: Int,
+        hue: Double,
+        saturation: Double,
+        powerOn: Bool,
+        skipColor: Bool,
+        identifiers: [UUID],
+        names: [String]
+    ) async -> WatchMultiLightWriteSummary {
+        await withTaskGroup(of: Bool.self) { group in
+            for (index, id) in identifiers.enumerated() {
+                let accessoryName = names.indices.contains(index) ? names[index] : nil
+                group.addTask {
+                    do {
+                        try await self.applyLightState(
+                            brightness: brightness,
+                            hue: hue,
+                            saturation: saturation,
+                            powerOn: powerOn,
+                            skipColor: skipColor,
+                            to: id,
+                            named: accessoryName
+                        )
+                        return true
+                    } catch {
+                        print("[WatchLightController] Failed to apply light state to \(id): \(error)")
+                        return false
+                    }
+                }
+            }
+
+            var attempted = 0
+            var succeeded = 0
+            for await success in group {
+                attempted += 1
+                if success {
+                    succeeded += 1
+                }
+            }
+
+            return WatchMultiLightWriteSummary(attempted: attempted, succeeded: succeeded)
+        }
+    }
+
+    private func applyLightState(
+        brightness: Int,
+        hue: Double,
+        saturation: Double,
+        powerOn: Bool,
+        skipColor: Bool,
+        to accessoryID: UUID,
+        named accessoryName: String?
+    ) async throws {
+        guard powerOn else {
+            try await homeKitService.setPowerState(false, for: accessoryID, named: accessoryName)
+            return
+        }
+
+        if brightness <= 0 {
+            try? await homeKitService.setBrightness(0, for: accessoryID, named: accessoryName)
+            try await homeKitService.setPowerState(false, for: accessoryID, named: accessoryName)
+            return
+        }
+
+        try? await homeKitService.setBrightness(brightness, for: accessoryID, named: accessoryName)
+
+        if !skipColor {
+            do {
+                try await homeKitService.setHue(hue, for: accessoryID, named: accessoryName)
+                try await homeKitService.setSaturation(
+                    saturation,
+                    for: accessoryID,
+                    named: accessoryName
+                )
+            } catch WatchHomeKitServiceError.characteristicNotFound {
+                // White-only bulbs do not expose hue/saturation.
+            }
+        }
+
+        try await homeKitService.setPowerState(true, for: accessoryID, named: accessoryName)
+        try await homeKitService.setBrightness(brightness, for: accessoryID, named: accessoryName)
     }
 }
 

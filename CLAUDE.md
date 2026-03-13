@@ -50,10 +50,10 @@ Views/
 
 Services/
   HomeKitService.swift             @Observable NSObject, HMHomeManagerDelegate, light discovery + characteristic writes + onHomesUpdated retry hook
-  LightController.swift            @Observable, multi-light batch writes via HomeKitService
-  ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HMTimerTrigger scenes + async smart wake ramp launcher + HomeKit retry debug state
-  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches schedule sync payloads, retries app context delivery, sends light-handoff acks
-  SmartWakeCoordinator.swift       @Observable, validates watch triggers against the matching occurrence, deduplicates by triggerID, and decides phone vs watch light ownership
+  LightController.swift            @Observable, multi-light batch writes via HomeKitService + best-effort write summaries
+  ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HMTimerTrigger scenes + smart wake ownership-commit ramp execution + HomeKit retry debug state
+  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks
+  SmartWakeCoordinator.swift       @Observable, validates fresh watch triggers against the matching occurrence, keeps bounded handoff dedupe, and decides phone vs watch light ownership
   HealthKitAuthorizationService.swift  @Observable, tracks watch health permission status (no direct HealthKit usage on iPhone)
 
 Utilities/
@@ -75,8 +75,8 @@ Views/
   WatchRootView.swift              Status, schedule list, diagnostics, permission prompt
 
 Services/
-  WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, sends triggers
-  SmartWakeSessionController.swift @Observable NSObject, HKWorkoutSession + seeded HR queries, deferred watch-local HomeKit fallback, handoff tracking
+  WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, sends triggers
+  SmartWakeSessionController.swift @Observable NSObject, live HR monitoring + best-effort historical seeding, deferred watch-local HomeKit fallback modes, handoff tracking
   SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, schedules overnight wake monitoring with `start(at:)`
   WakeHeuristicEngine.swift        @Observable, frozen pre-window HR baseline, confidence scoring, trigger decision
 
@@ -138,10 +138,9 @@ HealthKitAuthorizationService    (all injected as @Environment)
 
 ### Lifecycle Entry (`ContentView.onChange(scenePhase: .active)`)
 1. `scheduleEngine.onAppActive(modelContext:)` — checks active schedules + syncs background scenes
-2. `smartWakeCoordinator.processPendingTrigger(modelContext:)` — handles any queued watch trigger
-3. `smartWakeCoordinator.syncSchedulesToWatch(modelContext:)` — sends smart-wake schedules to watch
-4. `smartWakeCoordinator.resetDailyState()` — purges stale per-day trigger tracking
-5. Update health auth status from watch connectivity state
+2. `smartWakeCoordinator.syncSchedulesToWatch(modelContext:)` — sends smart-wake schedules to watch
+3. `smartWakeCoordinator.resetDailyState()` — purges stale per-day trigger tracking
+4. Update health auth status from watch connectivity state
 
 ### Schedule Save (`ScheduleDetailView.save` → `ScheduleListView.syncEngine`)
 1. SwiftData model insert/update
@@ -158,9 +157,9 @@ HealthKitAuthorizationService    (all injected as @Environment)
 
 ### Smart Wake (usesSmartWake == true)
 1. **No gradual ramp**: Smart wake schedules do NOT create per-minute background scenes or trigger foreground timers. Only a single fallback scene (`LT_<shortID>_fallback`) is created at the exact wake time, snapping lights to full brightness if the watch never triggers.
-2. iPhone sends `WatchScheduleSnapshot` array (including colors, `skipColorWrites`, `lightIdentifiers`, `lightNames`, and `hapticPatternRaw`) to watch via `WCSession.updateApplicationContext`. `WatchConnectivityService` caches the latest payload and retries delivery after WCSession activation/watch-state changes.
+2. iPhone sends `WatchScheduleSnapshot` array (including colors, `skipColorWrites`, `lightIdentifiers`, `lightNames`, and `hapticPatternRaw`) to watch via `WCSession.updateApplicationContext`. `WatchConnectivityService` caches the latest encoded payload, suppresses identical resends, and retries delivery only after WCSession activation/watch-state changes.
 3. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated`), evaluates the next relevant schedule, records the next wake window for debug UI, and uses `WKExtendedRuntimeSession.start(at:)` for overnight scheduling whenever the wake window has not started yet.
-4. When monitoring starts, `SmartWakeSessionController` seeds `WakeHeuristicEngine` with a one-shot historical heart-rate query from `wakeUpTime - 2h` through `now`, then starts `HKWorkoutSession` + `HKAnchoredObjectQuery` for live samples.
+4. When monitoring starts, `SmartWakeSessionController` immediately starts `HKWorkoutSession`, `HKAnchoredObjectQuery`, the wake-check timer, and trigger checks, then launches a best-effort historical heart-rate seed from `wakeUpTime - 2h` through `now`. Seed failures are logged but do not fail monitoring.
 5. `WakeHeuristicEngine` uses a frozen pre-window baseline:
    - Preferred baseline window: `windowStart - 60m` through `windowStart - 5m`
    - Statistic: median BPM
@@ -173,18 +172,20 @@ HealthKitAuthorizationService    (all injected as @Environment)
 6. When `shouldTrigger(inWakeWindow: true)` passes:
    - Watch starts wrist haptics immediately.
    - Watch sends `SmartWakeTriggerPayload` via `WCSession.sendMessage` (fallback: `transferUserInfo`) with a unique `triggerID` and the actual latest BPM in `heartRateAtTrigger`.
-   - Watch arms a deferred local HomeKit ramp for 8 seconds later instead of starting lights immediately.
+   - Watch arms a deferred local HomeKit fallback for 8 seconds later instead of starting lights immediately.
+   - Phone rejects stale triggers older than 2 hours and triggers more than 2 minutes in the future before occurrence matching.
    - Phone validates against the wake occurrence whose window contains `triggerDate`, not just the next future occurrence.
-   - Phone attempts `ScheduleEngine.startSmartWakeExecution(for:)` without blocking trigger validation on HomeKit discovery.
-   - Phone replies with `SmartWakeLightHandoffPayload` once it either commits to the phone ramp (`phoneWillHandleLights = true`) or declines (`false`, with a reason).
-   - Watch cancels its deferred local ramp only on a positive ack for the same `triggerID`; otherwise it starts the watch-local HomeKit ramp on timeout or immediate negative ack.
+   - Phone attempts `ScheduleEngine.startSmartWakeExecution(for:)`, which waits briefly for HomeKit readiness, computes a smart-wake ramp plan, and performs a synchronous first-visible-step ownership-commit write.
+   - Phone replies with `SmartWakeLightHandoffPayload` only after that initial write reaches at least one selected light (`phoneWillHandleLights = true`) or immediately declines (`false`, with a reason).
+   - Watch cancels its deferred local fallback only on a positive ack for the same `triggerID`; otherwise it starts watch-local fallback on timeout or immediate negative ack.
 7. `SmartWakeSessionController.finishMonitoringAfterTrigger()` tears down workout/query/timer state and returns the controller to `.idle` after reporting `.triggered`, but it does not stop haptics or the deferred/local light fallback path.
-8. `ScheduleEngine.startSmartWakeExecution(for:)` waits briefly for HomeKit readiness, launches the phone ramp asynchronously, and only removes the fallback scene after a foreground-capable phone ramp completes.
-9. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the early light ramp.
+8. Early watch fallback starts at the same first visible/non-zero step the phone uses and never sends the all-off step. Exact wake-time fallback writes the final target light state immediately after a timeout or negative ack instead of running a dim-from-zero ramp.
+9. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the wake.
 
 ### Duplicate Prevention
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
-- `SmartWakeCoordinator.processedHandoffs[triggerID]` — duplicate deliveries of the same trigger resend the same ownership ack instead of reprocessing.
+- `SmartWakeCoordinator.processedHandoffs[triggerID]` — timestamped handoff records; duplicate deliveries resend the same ownership ack instead of reprocessing. Entries are pruned after 24 hours and capped at 256 by oldest-first eviction.
+- Trigger freshness gate — triggers older than 2 hours or more than 2 minutes in the future are rejected before occurrence matching.
 - `ScheduleEngine.isRunning` guard — no second phone-side ramp if one is active.
 - Production smart wake no longer uses `lightsHandledOnWatch` to short-circuit the phone path; only explicit watch test mode still sets it.
 - Watch haptic timer auto-stops after 60s; `stopHaptics()` cancels early if `stopMonitoring()` is called.
@@ -202,15 +203,16 @@ HealthKitAuthorizationService    (all injected as @Environment)
 ### Graceful Degradation
 - Watch unavailable → single fallback scene at wake time snaps lights on.
 - HealthKit permissions denied → normal scheduled wake.
+- Historical HR seed failure → live HR monitoring continues without the seed.
 - Watch session dies → normal scheduled wake.
 - Extended runtime session expires/invalidates → `extendedRuntimeSessionWillExpire` force-starts monitoring if pending.
-- Trigger outside the matching occurrence window, disabled schedules, or phone ramp startup failure → negative handoff ack to the watch so the watch can take over immediately or on its 8-second timeout.
+- Stale/future-skewed triggers, triggers outside the matching occurrence window, disabled schedules, or phone ownership-commit failure → negative handoff ack to the watch so the watch can take over immediately or on its 8-second timeout.
 - If HomeKit homes are cold on the phone during background scene sync, `ScheduleEngine.hasPendingHomeKitRetry` is set and app-init wiring retries when `HomeKitService.onHomesUpdated` fires.
 
 ## iPhone↔Watch Communication Protocol
 
 ### iPhone → Watch
-- `WCSession.updateApplicationContext` (latest-state-wins) for `schedulesUpdated` / `[WatchScheduleSnapshot]`
+- `WCSession.updateApplicationContext` (latest-state-wins) for `schedulesUpdated` / `[WatchScheduleSnapshot]`; unchanged payloads are suppressed and retries happen after activation/watch-state changes only
 - `WCSession.sendMessage` (fallback `transferUserInfo`) for `smartWakeLightHandoff` / `SmartWakeLightHandoffPayload`
 
 ### Watch → iPhone
@@ -271,7 +273,8 @@ Files placed in `Lights Timer/` automatically belong to the iOS target. Files in
 - Async HomeKit wrappers use `withCheckedThrowingContinuation` over callback APIs.
 - iPhone direct `HMCharacteristic.writeValue` calls can fail from background wakeups (`HMErrorDomain Code=80`). Smart wake therefore prefers watch-local HomeKit writes when the watch can handle the selected accessories.
 - Watch-local HomeKit lookup uses synced accessory UUIDs first, then `lightNames` as a fallback when watch-visible accessory IDs differ from the phone.
-- Both iPhone and watch controllers now stage brightness/color before `powerOn = true` and keep step 0 powered off to avoid a start-of-ramp flash.
+- Normal ramps still stage brightness/color before `powerOn = true` and keep step 0 powered off to avoid a start-of-ramp flash.
+- Smart-wake phone ownership and early watch fallback both start from the first visible/non-zero step; exact wake-time watch fallback writes the final state directly instead of replaying the all-off step.
 
 ### Entitlements And Background Modes
 - iOS: `com.apple.developer.homekit` only
@@ -319,7 +322,7 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 2. Add Codable payload struct in **both** copies.
 3. Add send method in `WatchSessionManager.swift`.
 4. Add receive handler in `WatchConnectivityService.handleMessage`.
-5. Wire consumer in `SmartWakeCoordinator` or `ContentView`.
+5. Wire consumer in `SmartWakeCoordinator` or another app-side service.
 
 ### Modify the wake heuristic
 1. Edit `WakeHeuristicEngine.swift` (watch target only).
@@ -337,7 +340,7 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 ## Known Limitations
 - Smart wake heuristic is basic (HR rise + variability) — not true sleep-stage classification.
 - Foreground ramp (`Timer.publish`) only ticks while app is in foreground. Background relies on HomeKit timer-triggered scenes.
-- Phone-side smart wake remains the primary light owner, but background iPhone HomeKit writes can still fail if HomeKit never becomes ready quickly enough; in that case the watch-local fallback or exact wake-time scene must carry the wake.
+- Phone-side smart wake only acks after an initial ownership write, but later ramp steps still depend on background execution time; if the phone loses execution after claiming the lights, the already-written state plus the exact wake-time scene remain the backstops.
 - If the watch cannot resolve the chosen lights by UUID, it falls back to `lightNames`; if both fail, the phone may already have declined ownership and the exact wake-time fallback scene becomes the safety net.
 - Watch `WKExtendedRuntimeSession` (alarm type) + `HKWorkoutSession` consume battery — extended session starts up to 2 hours before wake, HR monitoring starts up to 1 hour before wake window.
 - The extended runtime session still must be scheduled while the watch app is awake or receiving WCSession delivery. `WatchSessionManager.onSchedulesUpdated` and cached iPhone schedule sync retries reduce this risk, but they do not eliminate watchOS scheduling limits.

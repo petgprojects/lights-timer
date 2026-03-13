@@ -53,8 +53,7 @@ struct WatchRootView: View {
                     .foregroundStyle(.secondary)
                     .font(.caption)
             } else {
-                ForEach(schedules.indices, id: \.self) { index in
-                    let schedule = sessionManager.activeSchedules[index]
+                ForEach(sessionManager.activeSchedules) { schedule in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
@@ -71,7 +70,14 @@ struct WatchRootView: View {
                             }
                         }
 
-                        Picker("Haptic", selection: schedules[index].hapticPatternRaw) {
+                        Picker(
+                            "Haptic",
+                            selection: bindingForSchedule(
+                                id: schedule.id,
+                                defaultPattern: schedule.hapticPatternRaw,
+                                schedules: schedules
+                            )
+                        ) {
                             ForEach(HapticPattern.allCases) { pattern in
                                 Text(pattern.displayName).tag(pattern.rawValue)
                             }
@@ -94,6 +100,25 @@ struct WatchRootView: View {
                 }
             }
         }
+    }
+
+    private func bindingForSchedule(
+        id scheduleID: UUID,
+        defaultPattern: String,
+        schedules: Binding<[WatchScheduleSnapshot]>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                schedules.wrappedValue.first(where: { $0.id == scheduleID })?.hapticPatternRaw
+                    ?? defaultPattern
+            },
+            set: { newValue in
+                guard let index = schedules.wrappedValue.firstIndex(where: { $0.id == scheduleID }) else {
+                    return
+                }
+                schedules.wrappedValue[index].hapticPatternRaw = newValue
+            }
+        )
     }
 
     private var diagnosticsSection: some View {

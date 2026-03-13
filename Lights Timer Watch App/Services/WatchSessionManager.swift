@@ -12,6 +12,8 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var onLightHandoff: ((SmartWakeLightHandoffPayload) -> Void)?
 
     private var session: WCSession?
+    private var hasProcessedIncomingApplicationContext = false
+    private var lastProcessedSchedulesPayload: Data?
 
     override init() {
         super.init()
@@ -130,6 +132,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     ) {
         Task { @MainActor in
             self.isPhoneReachable = session.isReachable
+            guard !self.hasProcessedIncomingApplicationContext else { return }
             self.processApplicationContext(session.receivedApplicationContext)
         }
     }
@@ -146,6 +149,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         didReceiveApplicationContext applicationContext: [String: Any]
     ) {
         Task { @MainActor in
+            self.hasProcessedIncomingApplicationContext = true
             self.processApplicationContext(applicationContext)
         }
     }
@@ -181,8 +185,11 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
               type == WCMessageKey.schedulesUpdated,
               let data = context[WCMessageKey.payload] as? Data else { return }
 
+        guard lastProcessedSchedulesPayload != data else { return }
+
         do {
             let schedules = try JSONDecoder().decode([WatchScheduleSnapshot].self, from: data)
+            lastProcessedSchedulesPayload = data
             activeSchedules = schedules
             onSchedulesUpdated?(schedules)
             print("[WatchSession] Received \(schedules.count) schedule(s) from phone")

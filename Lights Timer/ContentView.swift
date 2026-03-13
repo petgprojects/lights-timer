@@ -17,7 +17,6 @@ struct ContentView: View {
             if newPhase == .active {
                 Task {
                     await scheduleEngine.onAppActive(modelContext: modelContext)
-                    await smartWakeCoordinator.processPendingTrigger(modelContext: modelContext)
                 }
                 smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
                 smartWakeCoordinator.resetDailyState()

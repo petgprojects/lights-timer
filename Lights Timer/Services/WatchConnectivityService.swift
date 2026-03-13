@@ -10,6 +10,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
 
     private var session: WCSession?
     private var cachedSchedulesContext: [String: Any]?
+    private var lastSuccessfullySentSchedulesPayload: Data?
 
     var onSmartWakeTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onHapticPatternChanged: ((HapticPatternChangePayload) -> Void)?
@@ -66,12 +67,15 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     private func flushCachedSchedulesContext() {
         guard let session,
               session.activationState == .activated,
-              let context = cachedSchedulesContext else { return }
+              let context = cachedSchedulesContext,
+              let payload = context[WCMessageKey.payload] as? Data else { return }
+
+        guard lastSuccessfullySentSchedulesPayload != payload else { return }
 
         do {
             try session.updateApplicationContext(context)
-            if let data = context[WCMessageKey.payload] as? Data,
-               let schedules = try? JSONDecoder().decode([WatchScheduleSnapshot].self, from: data) {
+            lastSuccessfullySentSchedulesPayload = payload
+            if let schedules = try? JSONDecoder().decode([WatchScheduleSnapshot].self, from: payload) {
                 print("[WatchConnectivity] Sent \(schedules.count) schedule(s) to watch")
             } else {
                 print("[WatchConnectivity] Sent schedules to watch")
@@ -112,7 +116,6 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         Task { @MainActor in
             self.isWatchReachable = session.isReachable
-            self.flushCachedSchedulesContext()
         }
     }
 

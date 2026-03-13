@@ -1,5 +1,13 @@
 import Foundation
 
+struct MultiLightWriteSummary {
+    let attempted: Int
+    let succeeded: Int
+
+    var failed: Int { attempted - succeeded }
+    var hadAnySuccess: Bool { succeeded > 0 }
+}
+
 @Observable
 final class LightController {
     private let homeKitService: HomeKitService
@@ -69,6 +77,47 @@ final class LightController {
                 }
             }
             try await group.waitForAll()
+        }
+    }
+
+    func applyBestEffortToMultipleLights(
+        brightness: Int,
+        hue: Double,
+        saturation: Double,
+        powerOn: Bool,
+        skipColor: Bool = false,
+        identifiers: [UUID]
+    ) async -> MultiLightWriteSummary {
+        await withTaskGroup(of: Bool.self) { group in
+            for id in identifiers {
+                group.addTask {
+                    do {
+                        try await self.applyLightState(
+                            brightness: brightness,
+                            hue: hue,
+                            saturation: saturation,
+                            powerOn: powerOn,
+                            skipColor: skipColor,
+                            to: id
+                        )
+                        return true
+                    } catch {
+                        print("[LightController] Failed to apply light state to \(id): \(error)")
+                        return false
+                    }
+                }
+            }
+
+            var attempted = 0
+            var succeeded = 0
+            for await success in group {
+                attempted += 1
+                if success {
+                    succeeded += 1
+                }
+            }
+
+            return MultiLightWriteSummary(attempted: attempted, succeeded: succeeded)
         }
     }
 }

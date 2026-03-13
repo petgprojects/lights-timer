@@ -3,13 +3,22 @@ import SwiftData
 
 @Observable
 final class SmartWakeCoordinator {
+    private struct ProcessedHandoffRecord {
+        let payload: SmartWakeLightHandoffPayload
+        let createdAt: Date
+    }
+
     private let scheduleEngine: ScheduleEngine
     private let watchConnectivity: WatchConnectivityService
     private let modelContainer: ModelContainer
 
     private var firedToday: [UUID: Date] = [:]
-    private var processedHandoffs: [UUID: SmartWakeLightHandoffPayload] = [:]
-    private var pendingTrigger: SmartWakeTriggerPayload?
+    private var processedHandoffs: [UUID: ProcessedHandoffRecord] = [:]
+
+    private let maxTriggerAge: TimeInterval = 2 * 60 * 60
+    private let allowedFutureTriggerSkew: TimeInterval = 2 * 60
+    private let handoffRetention: TimeInterval = 24 * 60 * 60
+    private let handoffLimit = 256
 
     var lastTriggerResult: String?
     var lastLightRampOwner: String?
@@ -44,7 +53,9 @@ final class SmartWakeCoordinator {
     func handleTrigger(_ trigger: SmartWakeTriggerPayload) async {
         print("[SmartWakeCoordinator] Trigger received \(trigger.triggerID) for schedule \(trigger.scheduleID), confidence: \(trigger.confidence)")
 
-        if let existingHandoff = processedHandoffs[trigger.triggerID] {
+        pruneProcessedHandoffs()
+
+        if let existingHandoff = processedHandoffs[trigger.triggerID]?.payload {
             watchConnectivity.sendLightHandoff(existingHandoff)
             lastTriggerResult = "Duplicate trigger ignored"
             lastLightRampOwner = existingHandoff.phoneWillHandleLights ? "Phone" : "Watch"
@@ -52,52 +63,46 @@ final class SmartWakeCoordinator {
         }
 
         let context = ModelContext(modelContainer)
-        let processed = await processValidatedTrigger(trigger, modelContext: context)
-        if !processed {
-            pendingTrigger = trigger
-        }
+        await processValidatedTrigger(trigger, modelContext: context)
     }
 
-    func processPendingTrigger(modelContext: ModelContext) async {
-        guard let trigger = pendingTrigger else { return }
-        pendingTrigger = nil
-
-        _ = await processValidatedTrigger(trigger, modelContext: modelContext)
-    }
-
-    @discardableResult
     private func processValidatedTrigger(
         _ trigger: SmartWakeTriggerPayload,
         modelContext: ModelContext
-    ) async -> Bool {
+    ) async {
         do {
+            if let freshnessFailure = triggerFreshnessFailure(for: trigger.triggerDate) {
+                rejectTrigger(trigger, scheduleID: trigger.scheduleID, reason: freshnessFailure)
+                return
+            }
+
             let descriptor = FetchDescriptor<LightSchedule>()
             let schedules = try modelContext.fetch(descriptor)
 
             guard let schedule = schedules.first(where: { $0.id == trigger.scheduleID }) else {
                 rejectTrigger(trigger, scheduleID: trigger.scheduleID, reason: "Schedule not found")
-                return true
+                return
             }
 
             guard schedule.isEnabled else {
                 rejectTrigger(trigger, scheduleID: schedule.id, reason: "Schedule disabled")
-                return true
+                return
             }
 
             guard schedule.usesSmartWake else {
                 rejectTrigger(trigger, scheduleID: schedule.id, reason: "Smart wake not enabled")
-                return true
+                return
             }
 
             guard let occurrence = occurrenceContainingTriggerDate(trigger.triggerDate, for: schedule) else {
                 rejectTrigger(trigger, scheduleID: schedule.id, reason: "Outside wake window")
-                return true
+                return
             }
 
             if let firedOccurrence = firedToday[schedule.id],
                Calendar.current.isDate(firedOccurrence, inSameDayAs: occurrence.wakeUpTime) {
                 rejectTrigger(trigger, scheduleID: schedule.id, reason: "Already fired for this wake")
-                return true
+                return
             }
 
             firedToday[schedule.id] = occurrence.wakeUpTime
@@ -106,11 +111,11 @@ final class SmartWakeCoordinator {
 
             guard !scheduleEngine.isRunning else {
                 acceptWatchFallback(trigger, scheduleID: schedule.id, reason: "Phone ramp already running")
-                return true
+                return
             }
 
-            let phoneWillHandleLights = await scheduleEngine.startSmartWakeExecution(for: schedule)
-            if phoneWillHandleLights {
+            switch await scheduleEngine.startSmartWakeExecution(for: schedule) {
+            case .phoneCommitted:
                 sendHandoff(
                     triggerID: trigger.triggerID,
                     scheduleID: schedule.id,
@@ -119,14 +124,11 @@ final class SmartWakeCoordinator {
                 )
                 lastTriggerResult = "Phone accepted smart wake at \(formatTime(trigger.triggerDate))"
                 lastLightRampOwner = "Phone"
-            } else {
-                acceptWatchFallback(trigger, scheduleID: schedule.id, reason: "Phone could not start smart wake execution")
+            case .watchFallback(let reason):
+                acceptWatchFallback(trigger, scheduleID: schedule.id, reason: reason)
             }
-
-            return true
         } catch {
             rejectTrigger(trigger, scheduleID: trigger.scheduleID, reason: "Error: \(error.localizedDescription)")
-            return true
         }
     }
 
@@ -174,7 +176,11 @@ final class SmartWakeCoordinator {
             phoneWillHandleLights: phoneWillHandleLights,
             reason: reason
         )
-        processedHandoffs[triggerID] = payload
+        processedHandoffs[triggerID] = ProcessedHandoffRecord(
+            payload: payload,
+            createdAt: Date()
+        )
+        pruneProcessedHandoffs()
         watchConnectivity.sendLightHandoff(payload)
     }
 
@@ -260,12 +266,12 @@ final class SmartWakeCoordinator {
                 return
             }
 
-            let started = await scheduleEngine.startSmartWakeExecution(for: schedule)
-            if started {
+            switch await scheduleEngine.startSmartWakeExecution(for: schedule) {
+            case .phoneCommitted:
                 lastTriggerResult = "Test ramp started on phone for '\(schedule.name)'"
                 lastLightRampOwner = "Phone (test)"
-            } else {
-                lastTriggerResult = "Test phone ramp failed, watch should handle if available"
+            case .watchFallback(let reason):
+                lastTriggerResult = "Test phone ramp failed: \(reason)"
                 lastLightRampOwner = "Watch (test fallback)"
             }
         } catch {
@@ -317,5 +323,30 @@ final class SmartWakeCoordinator {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    private func triggerFreshnessFailure(for triggerDate: Date, now: Date = Date()) -> String? {
+        if now.timeIntervalSince(triggerDate) > maxTriggerAge {
+            return "Stale trigger"
+        }
+        if triggerDate.timeIntervalSince(now) > allowedFutureTriggerSkew {
+            return "Trigger date too far in future"
+        }
+        return nil
+    }
+
+    private func pruneProcessedHandoffs(now: Date = Date()) {
+        processedHandoffs = processedHandoffs.filter { _, record in
+            now.timeIntervalSince(record.createdAt) <= handoffRetention
+        }
+
+        guard processedHandoffs.count > handoffLimit else { return }
+        let oldestTriggerIDs = processedHandoffs
+            .sorted { $0.value.createdAt < $1.value.createdAt }
+            .prefix(processedHandoffs.count - handoffLimit)
+            .map(\.key)
+        for triggerID in oldestTriggerIDs {
+            processedHandoffs.removeValue(forKey: triggerID)
+        }
     }
 }

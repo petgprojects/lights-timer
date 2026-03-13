@@ -111,8 +111,7 @@ final class SmartAlarmScheduler: NSObject {
         monitoringTimer?.invalidate()
         monitoringTimer = nil
 
-        if let extendedSession,
-           extendedSession.state == .running || extendedSession.state == .scheduled {
+        if let extendedSession {
             extendedSession.invalidate()
         }
 

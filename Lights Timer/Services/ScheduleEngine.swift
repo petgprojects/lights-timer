@@ -6,6 +6,27 @@ import UIKit
 
 @Observable
 final class ScheduleEngine {
+    enum SmartWakeStartResult {
+        case phoneCommitted
+        case watchFallback(reason: String)
+    }
+
+    private struct SmartWakeRampPlan {
+        let identifiers: [UUID]
+        let rampDuration: TimeInterval
+        let stepInterval: TimeInterval
+        let stepCount: Int
+        let firstVisibleStep: Int
+        let shouldRemoveFallbackScene: Bool
+    }
+
+    private struct SmartWakeStepState {
+        let progress: Double
+        let brightness: Int
+        let hue: Double
+        let saturation: Double
+    }
+
     let homeKitService: HomeKitService
     private let lightController: LightController
     private var timerCancellable: AnyCancellable?
@@ -207,22 +228,27 @@ final class ScheduleEngine {
     /// Starts a rapid smart-wake ramp from 0% to target brightness.
     /// Uses available background execution time for a smooth ramp (up to 60 seconds).
     /// Falls back to setting final values immediately if background time is very short.
-    func startSmartWakeExecution(for schedule: LightSchedule) async -> Bool {
+    func startSmartWakeExecution(for schedule: LightSchedule) async -> SmartWakeStartResult {
         guard !isRunning else {
             print("[ScheduleEngine] Already running, ignoring smart wake trigger")
-            return false
+            return .watchFallback(reason: "Phone ramp already running")
         }
 
         await homeKitService.waitForReady(timeout: 6)
         guard !homeKitService.homes.isEmpty else {
             print("[ScheduleEngine] HomeKit homes unavailable, cannot start smart wake")
-            return false
+            return .watchFallback(reason: "HomeKit homes unavailable")
         }
 
         let identifiers = schedule.lightIdentifiers.compactMap { UUID(uuidString: $0) }
         guard !identifiers.isEmpty else {
             print("[ScheduleEngine] No light identifiers, cannot start smart wake")
-            return false
+            return .watchFallback(reason: "No light identifiers")
+        }
+
+        guard let rampPlan = makeSmartWakeRampPlan(for: schedule, identifiers: identifiers) else {
+            print("[ScheduleEngine] No visible smart wake step, cannot start smart wake")
+            return .watchFallback(reason: "No visible smart wake step")
         }
 
         activeSchedule = schedule
@@ -234,103 +260,105 @@ final class ScheduleEngine {
         }
 
         // Determine ramp duration based on available background time
-        let availableTime = UIApplication.shared.backgroundTimeRemaining
-        let rampDuration: TimeInterval
-        let shouldRemoveFallbackScene: Bool
-        if availableTime > 120 {
-            // App is in foreground (backgroundTimeRemaining returns very large value)
-            rampDuration = 60
-            shouldRemoveFallbackScene = true
-        } else {
-            // In background: use available time with safety buffer
-            rampDuration = max(min(availableTime - 8, 60), 3)
-            shouldRemoveFallbackScene = false
+        let initialState = smartWakeStepState(
+            for: schedule,
+            step: rampPlan.firstVisibleStep,
+            stepCount: rampPlan.stepCount
+        )
+        let initialWrite = await lightController.applyBestEffortToMultipleLights(
+            brightness: initialState.brightness,
+            hue: initialState.hue,
+            saturation: initialState.saturation,
+            powerOn: true,
+            skipColor: schedule.skipColorWrites,
+            identifiers: rampPlan.identifiers
+        )
+        guard initialWrite.hadAnySuccess else {
+            print("[ScheduleEngine] Phone could not claim any selected lights for '\(schedule.name)'")
+            stopForegroundExecution()
+            return .watchFallback(reason: "Phone could not claim any selected lights")
         }
 
-        let startTime = Date()
-        let endTime = startTime.addingTimeInterval(rampDuration)
-        transitionStartTime = startTime
-        transitionEndTime = endTime
+        let commitTime = Date()
+        let virtualStartTime = commitTime.addingTimeInterval(
+            -rampPlan.rampDuration * initialState.progress
+        )
+        transitionStartTime = virtualStartTime
+        transitionEndTime = virtualStartTime.addingTimeInterval(rampPlan.rampDuration)
+        currentProgress = initialState.progress
 
         smartWakeTask = Task { [weak self] in
             await self?.runSmartWakeExecution(
                 for: schedule,
-                identifiers: identifiers,
-                rampDuration: rampDuration,
-                shouldRemoveFallbackScene: shouldRemoveFallbackScene
+                rampPlan: rampPlan,
+                startingStep: rampPlan.firstVisibleStep + 1
             )
         }
-        return true
+        return .phoneCommitted
     }
 
     private func runSmartWakeExecution(
         for schedule: LightSchedule,
-        identifiers: [UUID],
-        rampDuration: TimeInterval,
-        shouldRemoveFallbackScene: Bool
+        rampPlan: SmartWakeRampPlan,
+        startingStep: Int
     ) async {
-        let stepInterval: TimeInterval = 5
-        let stepCount = max(Int(rampDuration / stepInterval), 1)
+        print(
+            "[ScheduleEngine] Smart wake ramp: \(Int(rampPlan.rampDuration))s, \(rampPlan.stepCount) steps for '\(schedule.name)'"
+        )
 
-        print("[ScheduleEngine] Smart wake ramp: \(Int(rampDuration))s, \(stepCount) steps for '\(schedule.name)'")
+        if startingStep <= rampPlan.stepCount {
+            for step in startingStep...rampPlan.stepCount {
+                guard !Task.isCancelled, isRunning else { break }
 
-        for step in 0...stepCount {
-            guard !Task.isCancelled, isRunning else { break }
+                let remaining = UIApplication.shared.backgroundTimeRemaining
+                if remaining < 6 && remaining < 100 {
+                    print("[ScheduleEngine] Background time low (\(Int(remaining))s), jumping to final state")
+                    break
+                }
 
-            let remaining = UIApplication.shared.backgroundTimeRemaining
-            if remaining < 6 && remaining < 100 {
-                print("[ScheduleEngine] Background time low (\(Int(remaining))s), jumping to final state")
-                break
-            }
+                let state = smartWakeStepState(
+                    for: schedule,
+                    step: step,
+                    stepCount: rampPlan.stepCount
+                )
+                currentProgress = state.progress
 
-            let progress = min(Double(step) / Double(stepCount), 1.0)
-            currentProgress = progress
+                print(
+                    "[ScheduleEngine] Smart wake step \(step)/\(rampPlan.stepCount): brightness=\(state.brightness), progress=\(String(format: "%.0f%%", state.progress * 100))"
+                )
 
-            let brightness = interpolateBrightness(
-                target: schedule.targetBrightness,
-                progress: progress
-            )
-            let hsb = interpolateHSB(
-                startHue: schedule.startColorHue,
-                startSat: schedule.startColorSaturation,
-                startBri: schedule.startColorBrightness,
-                endHue: schedule.endColorHue,
-                endSat: schedule.endColorSaturation,
-                endBri: schedule.endColorBrightness,
-                progress: progress
-            )
-
-            print("[ScheduleEngine] Smart wake step \(step)/\(stepCount): brightness=\(brightness), progress=\(String(format: "%.0f%%", progress * 100))")
-
-            do {
-                try await lightController.applyToMultipleLights(
-                    brightness: brightness,
-                    hue: hsb.hue * 360.0,
-                    saturation: hsb.saturation * 100.0,
+                let stepWrite = await lightController.applyBestEffortToMultipleLights(
+                    brightness: state.brightness,
+                    hue: state.hue,
+                    saturation: state.saturation,
                     powerOn: true,
                     skipColor: schedule.skipColorWrites,
-                    identifiers: identifiers
+                    identifiers: rampPlan.identifiers
                 )
-            } catch {
-                print("[ScheduleEngine] Smart wake write failed at step \(step): \(error)")
-            }
+                if !stepWrite.hadAnySuccess {
+                    print("[ScheduleEngine] Smart wake step \(step) did not reach any selected lights")
+                }
 
-            if step < stepCount {
-                try? await Task.sleep(for: .seconds(stepInterval))
+                if step < rampPlan.stepCount {
+                    try? await Task.sleep(for: .seconds(rampPlan.stepInterval))
+                }
             }
         }
 
         if !Task.isCancelled {
-            try? await lightController.applyToMultipleLights(
+            let finalWrite = await lightController.applyBestEffortToMultipleLights(
                 brightness: schedule.targetBrightness,
                 hue: schedule.endColorHue * 360.0,
                 saturation: schedule.endColorSaturation * 100.0,
                 powerOn: true,
                 skipColor: schedule.skipColorWrites,
-                identifiers: identifiers
+                identifiers: rampPlan.identifiers
             )
+            if !finalWrite.hadAnySuccess {
+                print("[ScheduleEngine] Smart wake final write did not reach any selected lights")
+            }
 
-            if shouldRemoveFallbackScene {
+            if rampPlan.shouldRemoveFallbackScene && finalWrite.hadAnySuccess {
                 await cleanupScenesForSchedule(schedule.id)
             }
         }
@@ -353,6 +381,68 @@ final class ScheduleEngine {
                 try? await removeActionSet(scene, from: home)
             }
         }
+    }
+
+    private func makeSmartWakeRampPlan(
+        for schedule: LightSchedule,
+        identifiers: [UUID]
+    ) -> SmartWakeRampPlan? {
+        let availableTime = UIApplication.shared.backgroundTimeRemaining
+        let rampDuration: TimeInterval
+        let shouldRemoveFallbackScene: Bool
+        if availableTime > 120 {
+            rampDuration = 60
+            shouldRemoveFallbackScene = true
+        } else {
+            rampDuration = max(min(availableTime - 8, 60), 3)
+            shouldRemoveFallbackScene = false
+        }
+
+        let stepInterval: TimeInterval = 5
+        let stepCount = max(Int(rampDuration / stepInterval), 1)
+        guard let firstVisibleStep = (0...stepCount).first(where: { step in
+            let progress = min(Double(step) / Double(stepCount), 1.0)
+            return interpolateBrightness(target: schedule.targetBrightness, progress: progress) > 0
+        }) else {
+            return nil
+        }
+
+        return SmartWakeRampPlan(
+            identifiers: identifiers,
+            rampDuration: rampDuration,
+            stepInterval: stepInterval,
+            stepCount: stepCount,
+            firstVisibleStep: firstVisibleStep,
+            shouldRemoveFallbackScene: shouldRemoveFallbackScene
+        )
+    }
+
+    private func smartWakeStepState(
+        for schedule: LightSchedule,
+        step: Int,
+        stepCount: Int
+    ) -> SmartWakeStepState {
+        let progress = min(Double(step) / Double(stepCount), 1.0)
+        let brightness = interpolateBrightness(
+            target: schedule.targetBrightness,
+            progress: progress
+        )
+        let hsb = interpolateHSB(
+            startHue: schedule.startColorHue,
+            startSat: schedule.startColorSaturation,
+            startBri: schedule.startColorBrightness,
+            endHue: schedule.endColorHue,
+            endSat: schedule.endColorSaturation,
+            endBri: schedule.endColorBrightness,
+            progress: progress
+        )
+
+        return SmartWakeStepState(
+            progress: progress,
+            brightness: brightness,
+            hue: hsb.hue * 360.0,
+            saturation: hsb.saturation * 100.0
+        )
     }
 
     // MARK: - Background Scenes (HMActionSet + HMTimerTrigger)
