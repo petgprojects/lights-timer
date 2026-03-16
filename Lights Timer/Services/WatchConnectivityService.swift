@@ -28,6 +28,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     init(logStore: PhoneLogStore) {
         self.logStore = logStore
         super.init()
+        Self.ensureReceivedWatchLogStagingDirectory()
         if WCSession.isSupported() {
             let session = WCSession.default
             session.delegate = self
@@ -179,12 +180,27 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
         _ session: WCSession,
         didReceive file: WCSessionFile
     ) {
-        Task { @MainActor in
-            self.noteWatchAppPresence()
-            self.log(
-                "Received watch log file \(file.fileURL.lastPathComponent) with metadata \(file.metadata ?? [:])"
-            )
-            self.onWatchLogFileReceived?(file.fileURL, file.metadata)
+        let metadata = file.metadata
+        let fileName = (metadata?["filename"] as? String) ?? file.fileURL.lastPathComponent
+        let metadataDescription = String(describing: metadata ?? [:])
+
+        do {
+            let stagedURL = try Self.stageReceivedWatchLog(from: file.fileURL, fileName: fileName)
+            Task { @MainActor in
+                self.noteWatchAppPresence()
+                self.log(
+                    "Received watch log file \(fileName) with metadata \(metadataDescription)"
+                )
+                self.onWatchLogFileReceived?(stagedURL, metadata)
+            }
+        } catch {
+            Task { @MainActor in
+                self.noteWatchAppPresence()
+                self.log(
+                    "Failed to stage received watch log file \(fileName): \(error.localizedDescription)",
+                    level: .error
+                )
+            }
         }
     }
 
@@ -267,5 +283,34 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
 
     private func log(_ message: String, level: PhoneLogLevel = .info) {
         logStore.log("WatchConnectivity", message, level: level)
+    }
+
+    nonisolated private static func ensureReceivedWatchLogStagingDirectory() {
+        try? FileManager.default.createDirectory(
+            at: receivedWatchLogStagingDirectoryURL(),
+            withIntermediateDirectories: true
+        )
+    }
+
+    nonisolated private static func stageReceivedWatchLog(
+        from temporaryURL: URL,
+        fileName: String
+    ) throws -> URL {
+        let fileManager = FileManager.default
+        let safeFileName = (fileName as NSString).lastPathComponent
+        let destinationURL = receivedWatchLogStagingDirectoryURL()
+            .appendingPathComponent("\(UUID().uuidString)-\(safeFileName)")
+
+        try fileManager.copyItem(at: temporaryURL, to: destinationURL)
+        return destinationURL
+    }
+
+    nonisolated private static func receivedWatchLogStagingDirectoryURL() -> URL {
+        let fileManager = FileManager.default
+        let appSupportURL = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        return appSupportURL.appendingPathComponent("ReceivedWatchLogTransfers", isDirectory: true)
     }
 }

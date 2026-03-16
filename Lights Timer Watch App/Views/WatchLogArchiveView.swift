@@ -54,26 +54,15 @@ struct WatchLogArchiveView: View {
 }
 
 private struct WatchLogDetailView: View {
-    @Environment(SmartWakeLogStore.self) private var logStore
-
     let logFile: SmartWakeLogFile
 
-    @State private var contents = ""
-
     var body: some View {
-        ScrollView {
-            Text(verbatim: contents)
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        ChunkedLogTextView(fileURL: logFile.url)
         .navigationTitle(logFile.displayName)
         .toolbar {
-            ShareLink(item: logFile.url) {
+            ShareLink(item: logFile, preview: SharePreview(logFile.fileName)) {
                 Image(systemName: "square.and.arrow.up")
             }
-        }
-        .task {
-            contents = logStore.logContents(for: logFile)
         }
     }
 }

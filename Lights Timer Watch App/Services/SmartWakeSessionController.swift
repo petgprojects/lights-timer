@@ -34,6 +34,8 @@ final class SmartWakeSessionController: NSObject {
     private(set) var errorMessage: String?
     private(set) var isHealthKitAuthorized: Bool = false
     private(set) var isMonitoringActive = false
+    private(set) var isWorkoutSessionRunning = false
+    private(set) var isDegradedMode = false
 
     private(set) var nextScheduledWakeWindowDescription: String?
     private(set) var didReceivePhoneHandoffAck = false
@@ -79,6 +81,10 @@ final class SmartWakeSessionController: NSObject {
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
+    var onPostTriggerWorkComplete: (() -> Void)?
+    /// Fires when monitoring ends without a trigger (manual stop or failure).
+    /// The scheduler uses this to tear down its extended runtime session and clear stale state.
+    var onMonitoringCancelled: (() -> Void)?
     var onLogReadyToTransfer: ((URL) -> Void)?
 
     init(logStore: SmartWakeLogStore) {
@@ -239,11 +245,14 @@ final class SmartWakeSessionController: NSObject {
         )
 
         isMonitoringActive = true
+        isDegradedMode = false
         sessionState = .monitoring
         notifyStateChange()
 
-        do {
-            try await startWorkoutSession()
+        if workoutSession != nil {
+            // Proactive workout session is already running — skip starting a new one
+            isWorkoutSessionRunning = true
+            log("SESSION", "Reusing proactive workout session for monitoring")
             startHeartRateQuery(from: Date())
             startWakeCheckTimer()
             checkForWakeTrigger()
@@ -252,8 +261,26 @@ final class SmartWakeSessionController: NSObject {
                 to: Date()
             )
             log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-        } catch {
-            failMonitoring("Failed to start session: \(error.localizedDescription)")
+        } else {
+            do {
+                try await startWorkoutSession()
+                isWorkoutSessionRunning = true
+                startHeartRateQuery(from: Date())
+                startWakeCheckTimer()
+                checkForWakeTrigger()
+                startHistoricalSeed(
+                    from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                    to: Date()
+                )
+                log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
+            } catch {
+                log(
+                    "SESSION",
+                    "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
+                    level: .warning
+                )
+                startDegradedMonitoring()
+            }
         }
     }
 
@@ -262,7 +289,7 @@ final class SmartWakeSessionController: NSObject {
 
         log(
             "SESSION",
-            "Finishing monitoring after trigger. Deferred handoff/light fallback may continue."
+            "Finishing monitoring after trigger. Workout session kept alive for post-trigger work (haptics, handoff, light fallback)."
         )
         tearDownMonitoringSession()
         currentSchedule = nil
@@ -272,14 +299,48 @@ final class SmartWakeSessionController: NSObject {
         didLogWakeWindowStart = false
         isMonitoringActive = false
 
+        // Defer workout teardown until haptics + light fallback are done,
+        // so the workout-processing background assertion stays alive.
         Task { [weak self] in
+            await self?.waitForPostTriggerWork()
+            await MainActor.run {
+                guard let self else { return }
+                self.log("SESSION", "Post-trigger work complete — ending workout session")
+            }
             await self?.endWorkoutSession()
             await MainActor.run {
                 guard let self else { return }
+                self.activeTriggerID = nil
+                self.activeTriggerSchedule = nil
+                self.activeTriggerDate = nil
+                self.activeTriggerWakeUpTime = nil
+                self.activeTriggerFallbackMode = nil
+                self.activeLocalRampTriggerID = nil
                 self.sessionState = .idle
                 self.notifyStateChange()
+                self.onPostTriggerWorkComplete?()
                 self.log("SESSION", "Monitoring cleanup completed after trigger")
             }
+        }
+    }
+
+    private func waitForPostTriggerWork() async {
+        // Poll until haptics, deferred handoff, and light ramp are all done.
+        // Haptics: max 60s. Deferred handoff: 8s. Light ramp: ~60s after that.
+        // Worst case total: ~130s. Poll interval kept short to avoid unnecessary delay.
+        let maxWait: TimeInterval = 180
+        let pollInterval: TimeInterval = 2
+        let deadline = Date().addingTimeInterval(maxWait)
+
+        while Date() < deadline {
+            let done = await MainActor.run {
+                hapticTimer == nil && deferredLightRampTask == nil && lightRampTask == nil
+            }
+            if done { return }
+            try? await Task.sleep(for: .seconds(pollInterval))
+        }
+        await MainActor.run {
+            log("SESSION", "Post-trigger work wait timed out after \(Int(maxWait))s — proceeding with cleanup", level: .warning)
         }
     }
 
@@ -304,9 +365,11 @@ final class SmartWakeSessionController: NSObject {
         windowStartTime = nil
         didLogWakeWindowStart = false
         isMonitoringActive = false
+        isDegradedMode = false
         errorMessage = nil
         sessionState = .idle
         notifyStateChange()
+        onMonitoringCancelled?()
 
         Task { [weak self] in
             await self?.endWorkoutSession()
@@ -337,9 +400,11 @@ final class SmartWakeSessionController: NSObject {
         windowStartTime = nil
         didLogWakeWindowStart = false
         isMonitoringActive = false
+        isDegradedMode = false
         errorMessage = message
         sessionState = .failed
         notifyStateChange()
+        onMonitoringCancelled?()
 
         Task { [weak self] in
             await self?.endWorkoutSession()
@@ -453,7 +518,53 @@ final class SmartWakeSessionController: NSObject {
         }
         workoutSession = nil
         workoutBuilder = nil
+        isWorkoutSessionRunning = false
         log("HEALTHKIT", "Workout session ended")
+    }
+
+    // MARK: - Proactive Workout Session
+
+    func startProactiveWorkoutSession() async throws {
+        guard workoutSession == nil else {
+            log("HEALTHKIT", "Proactive workout start skipped — workout session already exists")
+            return
+        }
+
+        log("HEALTHKIT", "Starting proactive workout session for background keep-alive")
+        try await startWorkoutSession()
+        isWorkoutSessionRunning = true
+        log("HEALTHKIT", "Proactive workout session started successfully")
+    }
+
+    func endProactiveWorkoutSession() {
+        guard workoutSession != nil, !isMonitoringActive else { return }
+        log("HEALTHKIT", "Ending proactive workout session")
+        Task { [weak self] in
+            await self?.endWorkoutSession()
+        }
+    }
+
+    // MARK: - Degraded Monitoring
+
+    private func startDegradedMonitoring() {
+        isDegradedMode = true
+        log(
+            "SESSION",
+            "Degraded monitoring active — no workout session. Force-fire at wake time guaranteed.",
+            level: .warning
+        )
+
+        startHeartRateQuery(from: Date())
+        startWakeCheckTimer()
+
+        if let wakeUpTime {
+            startHistoricalSeed(
+                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                to: Date()
+            )
+        }
+
+        checkForWakeTrigger()
     }
 
     // MARK: - Heart Rate Query
@@ -537,7 +648,7 @@ final class SmartWakeSessionController: NSObject {
 
     private func startHeartRateQuery(from startDate: Date) {
         let heartRateType = HKQuantityType(.heartRate)
-        log("HEALTHKIT", "Starting anchored heart-rate query from \(formatTimestamp(startDate))")
+        log("HEALTHKIT", "Starting anchored heart-rate query from \(formatTimestamp(startDate)) (open-ended; future-dated samples filtered in heuristic engine)")
 
         let query = HKAnchoredObjectQuery(
             type: heartRateType,
@@ -725,8 +836,12 @@ final class SmartWakeSessionController: NSObject {
         )
         deferredLightRampTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(self?.watchLightHandoffDelay ?? 8))
+            guard !Task.isCancelled else { return }
 
             await MainActor.run {
+                // Re-check cancellation inside MainActor.run: a phone ACK may have
+                // cancelled this task after the check above but before this block runs.
+                guard !Task.isCancelled else { return }
                 guard let self,
                       self.activeTriggerID == triggerID,
                       self.activeLocalRampTriggerID == nil else { return }
@@ -827,6 +942,13 @@ final class SmartWakeSessionController: NSObject {
                 identifiers: identifiers,
                 reason: reason
             )
+        }
+
+        await MainActor.run {
+            lightRampTask = nil
+            // Keep activeLocalRampTriggerID set — it guards against late handoffs
+            // restarting fallback. Cleared in final post-trigger cleanup.
+            log("LIGHTS", "Local light fallback task completed")
         }
     }
 
@@ -1129,8 +1251,25 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                 "HEALTHKIT",
                 "Workout session state changed from \(fromState.rawValue) to \(toState.rawValue) at \(self.formatTimestamp(date))"
             )
-            if toState == .ended, self.isMonitoringActive {
-                self.failMonitoring("Workout session ended unexpectedly")
+            guard workoutSession === self.workoutSession else {
+                self.log(
+                    "HEALTHKIT",
+                    "Ignoring state change from stale workout session",
+                    level: .warning
+                )
+                return
+            }
+            if toState == .ended {
+                self.isWorkoutSessionRunning = false
+                if self.isMonitoringActive && !self.isDegradedMode {
+                    self.log(
+                        "SESSION",
+                        "Workout session ended during monitoring — switching to degraded mode",
+                        level: .warning
+                    )
+                    self.isDegradedMode = true
+                    // Keep monitoring alive — wake check timer and HR query may still work
+                }
             }
         }
     }
@@ -1145,7 +1284,23 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                 "Workout session delegate reported failure: \(error.localizedDescription)",
                 level: .error
             )
-            self.failMonitoring(error.localizedDescription)
+            guard workoutSession === self.workoutSession else {
+                self.log(
+                    "HEALTHKIT",
+                    "Ignoring failure from stale workout session",
+                    level: .warning
+                )
+                return
+            }
+            self.isWorkoutSessionRunning = false
+            if self.isMonitoringActive && !self.isDegradedMode {
+                self.log(
+                    "SESSION",
+                    "Workout session failed during monitoring — switching to degraded mode",
+                    level: .warning
+                )
+                self.isDegradedMode = true
+            }
         }
     }
 }

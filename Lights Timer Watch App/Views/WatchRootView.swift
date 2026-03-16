@@ -176,6 +176,20 @@ struct WatchRootView: View {
             }
 
             HStack {
+                Text("Workout Session")
+                    .font(.caption)
+                Spacer()
+                Image(systemName: sessionController.isWorkoutSessionRunning ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundStyle(sessionController.isWorkoutSessionRunning ? .green : .secondary)
+            }
+
+            if sessionController.isDegradedMode {
+                Text("Degraded mode — no workout session")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
                 Text("Background Session")
                     .font(.caption)
                 Spacer()
@@ -204,7 +218,7 @@ struct WatchRootView: View {
             }
 
             if let runtimeLog = logStore.runtimeLogFile {
-                ShareLink(item: runtimeLog.url) {
+                ShareLink(item: runtimeLog, preview: SharePreview(runtimeLog.fileName)) {
                     Label("Share Runtime Log", systemImage: "square.and.arrow.up")
                 }
 
@@ -228,7 +242,7 @@ struct WatchRootView: View {
             }
 
             if let latestSessionLog = logStore.latestSessionLog {
-                ShareLink(item: latestSessionLog.url) {
+                ShareLink(item: latestSessionLog, preview: SharePreview(latestSessionLog.fileName)) {
                     Label("Share Latest Session Log", systemImage: "doc.text")
                 }
 
