@@ -34,6 +34,8 @@ final class SmartWakeSessionController: NSObject {
     private(set) var errorMessage: String?
     private(set) var isHealthKitAuthorized: Bool = false
     private(set) var isMonitoringActive = false
+    private(set) var isWorkoutSessionRunning = false
+    private(set) var isDegradedMode = false
 
     private(set) var nextScheduledWakeWindowDescription: String?
     private(set) var didReceivePhoneHandoffAck = false
@@ -239,11 +241,14 @@ final class SmartWakeSessionController: NSObject {
         )
 
         isMonitoringActive = true
+        isDegradedMode = false
         sessionState = .monitoring
         notifyStateChange()
 
-        do {
-            try await startWorkoutSession()
+        if workoutSession != nil {
+            // Proactive workout session is already running — skip starting a new one
+            isWorkoutSessionRunning = true
+            log("SESSION", "Reusing proactive workout session for monitoring")
             startHeartRateQuery(from: Date())
             startWakeCheckTimer()
             checkForWakeTrigger()
@@ -252,8 +257,26 @@ final class SmartWakeSessionController: NSObject {
                 to: Date()
             )
             log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-        } catch {
-            failMonitoring("Failed to start session: \(error.localizedDescription)")
+        } else {
+            do {
+                try await startWorkoutSession()
+                isWorkoutSessionRunning = true
+                startHeartRateQuery(from: Date())
+                startWakeCheckTimer()
+                checkForWakeTrigger()
+                startHistoricalSeed(
+                    from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                    to: Date()
+                )
+                log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
+            } catch {
+                log(
+                    "SESSION",
+                    "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
+                    level: .warning
+                )
+                startDegradedMonitoring()
+            }
         }
     }
 
@@ -304,6 +327,7 @@ final class SmartWakeSessionController: NSObject {
         windowStartTime = nil
         didLogWakeWindowStart = false
         isMonitoringActive = false
+        isDegradedMode = false
         errorMessage = nil
         sessionState = .idle
         notifyStateChange()
@@ -337,6 +361,7 @@ final class SmartWakeSessionController: NSObject {
         windowStartTime = nil
         didLogWakeWindowStart = false
         isMonitoringActive = false
+        isDegradedMode = false
         errorMessage = message
         sessionState = .failed
         notifyStateChange()
@@ -453,7 +478,53 @@ final class SmartWakeSessionController: NSObject {
         }
         workoutSession = nil
         workoutBuilder = nil
+        isWorkoutSessionRunning = false
         log("HEALTHKIT", "Workout session ended")
+    }
+
+    // MARK: - Proactive Workout Session
+
+    func startProactiveWorkoutSession() async throws {
+        guard workoutSession == nil else {
+            log("HEALTHKIT", "Proactive workout start skipped — workout session already exists")
+            return
+        }
+
+        log("HEALTHKIT", "Starting proactive workout session for background keep-alive")
+        try await startWorkoutSession()
+        isWorkoutSessionRunning = true
+        log("HEALTHKIT", "Proactive workout session started successfully")
+    }
+
+    func endProactiveWorkoutSession() {
+        guard workoutSession != nil, !isMonitoringActive else { return }
+        log("HEALTHKIT", "Ending proactive workout session")
+        Task { [weak self] in
+            await self?.endWorkoutSession()
+        }
+    }
+
+    // MARK: - Degraded Monitoring
+
+    private func startDegradedMonitoring() {
+        isDegradedMode = true
+        log(
+            "SESSION",
+            "Degraded monitoring active — no workout session. Force-fire at wake time guaranteed.",
+            level: .warning
+        )
+
+        startHeartRateQuery(from: Date())
+        startWakeCheckTimer()
+
+        if let wakeUpTime {
+            startHistoricalSeed(
+                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                to: Date()
+            )
+        }
+
+        checkForWakeTrigger()
     }
 
     // MARK: - Heart Rate Query
@@ -1129,8 +1200,17 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                 "HEALTHKIT",
                 "Workout session state changed from \(fromState.rawValue) to \(toState.rawValue) at \(self.formatTimestamp(date))"
             )
-            if toState == .ended, self.isMonitoringActive {
-                self.failMonitoring("Workout session ended unexpectedly")
+            if toState == .ended {
+                self.isWorkoutSessionRunning = false
+                if self.isMonitoringActive && !self.isDegradedMode {
+                    self.log(
+                        "SESSION",
+                        "Workout session ended during monitoring — switching to degraded mode",
+                        level: .warning
+                    )
+                    self.isDegradedMode = true
+                    // Keep monitoring alive — wake check timer and HR query may still work
+                }
             }
         }
     }
@@ -1145,7 +1225,15 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                 "Workout session delegate reported failure: \(error.localizedDescription)",
                 level: .error
             )
-            self.failMonitoring(error.localizedDescription)
+            self.isWorkoutSessionRunning = false
+            if self.isMonitoringActive && !self.isDegradedMode {
+                self.log(
+                    "SESSION",
+                    "Workout session failed during monitoring — switching to degraded mode",
+                    level: .warning
+                )
+                self.isDegradedMode = true
+            }
         }
     }
 }

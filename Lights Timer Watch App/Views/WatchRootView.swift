@@ -176,6 +176,20 @@ struct WatchRootView: View {
             }
 
             HStack {
+                Text("Workout Session")
+                    .font(.caption)
+                Spacer()
+                Image(systemName: sessionController.isWorkoutSessionRunning ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundStyle(sessionController.isWorkoutSessionRunning ? .green : .secondary)
+            }
+
+            if sessionController.isDegradedMode {
+                Text("Degraded mode — no workout session")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
                 Text("Background Session")
                     .font(.caption)
                 Spacer()

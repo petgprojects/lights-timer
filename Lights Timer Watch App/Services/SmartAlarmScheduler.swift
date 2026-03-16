@@ -19,8 +19,8 @@ final class SmartAlarmScheduler: NSObject {
     private let sessionManager: WatchSessionManager
     private let logStore: SmartWakeLogStore
 
-    private let sessionLeadTime: TimeInterval = 3600
     private let monitoringLeadTime: TimeInterval = 3600
+    private let proactiveWorkoutHorizon: TimeInterval = 43200  // 12 hours
 
     init(
         sessionController: SmartWakeSessionController,
@@ -102,13 +102,74 @@ final class SmartAlarmScheduler: NSObject {
             return
         }
 
-        let desiredSessionStart = max(windowStart.addingTimeInterval(-sessionLeadTime), now.addingTimeInterval(1))
+        // Schedule extended runtime session to fire at wakeTime - min(windowMinutes, 30) min
+        // This ensures the ~30 min execution window always covers wake time for force-fire + haptics
+        let sessionLeadSeconds = Double(min(nextSchedule.smartWakeWindowMinutes, 30)) * 60
+        let desiredSessionStart = max(wakeUpTime.addingTimeInterval(-sessionLeadSeconds), now.addingTimeInterval(1))
         scheduleAlarmSession(
             at: desiredSessionStart,
             schedule: nextSchedule,
             wakeUpTime: wakeUpTime,
             windowStart: windowStart
         )
+
+        // Evaluate proactive workout start if app is in foreground
+        evaluateProactiveWorkout(schedules)
+    }
+
+    // MARK: - Proactive Workout
+
+    func evaluateProactiveWorkout(_ schedules: [WatchScheduleSnapshot]) {
+        guard !sessionController.isWorkoutSessionRunning else { return }
+
+        let smartWakeSchedules = schedules.filter(\.usesSmartWake)
+        let now = Date()
+        let horizon = now.addingTimeInterval(proactiveWorkoutHorizon)
+
+        guard let nextSchedule = findNextRelevantSchedule(smartWakeSchedules),
+              let wakeUpTime = nextWakeTime(for: nextSchedule),
+              wakeUpTime <= horizon else {
+            return
+        }
+
+        let appState = WKApplication.shared().applicationState
+        guard appState == .active else {
+            logStore.log(
+                "SCHEDULER",
+                "Proactive workout skipped — app not in foreground (state=\(appState.rawValue))"
+            )
+            return
+        }
+
+        let windowStart = wakeUpTime.addingTimeInterval(-Double(nextSchedule.smartWakeWindowMinutes) * 60)
+
+        logStore.log(
+            "SCHEDULER",
+            "Starting proactive workout session for '\(nextSchedule.name)' wake=\(formatTimestamp(wakeUpTime))"
+        )
+
+        Task {
+            do {
+                try await sessionController.startProactiveWorkoutSession()
+                // Schedule deferred monitoring start — workout-processing keeps us alive
+                scheduleMonitoringStart(
+                    schedule: nextSchedule,
+                    wakeUpTime: wakeUpTime,
+                    windowStart: windowStart
+                )
+            } catch {
+                logStore.log(
+                    "SCHEDULER",
+                    "Proactive workout session failed: \(error.localizedDescription)",
+                    level: .error
+                )
+            }
+        }
+    }
+
+    func onAppForeground() {
+        logStore.log("SCHEDULER", "App returned to foreground — re-evaluating proactive workout")
+        evaluateProactiveWorkout(sessionManager.activeSchedules)
     }
 
     // MARK: - Extended Runtime Session
@@ -284,6 +345,14 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
             self.isAlarmSessionActive = true
             self.sessionController.isAlarmSessionActive = true
             self.logStore.log("SCHEDULER", "Extended runtime session is now running")
+
+            if self.sessionController.isMonitoringActive {
+                self.logStore.log(
+                    "SCHEDULER",
+                    "Safety-net session started; monitoring already active via proactive workout — skipping"
+                )
+                return
+            }
 
             if let pending = self.pendingSchedule {
                 self.scheduleMonitoringStart(

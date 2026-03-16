@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct LightsTimerWatchApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var logStore: SmartWakeLogStore
     @State private var sessionManager: WatchSessionManager
     @State private var sessionController: SmartWakeSessionController
@@ -69,6 +70,13 @@ struct LightsTimerWatchApp: App {
                     #if os(watchOS)
                     alarmScheduler?.schedulesDidUpdate(schedules)
                     #endif
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    if newPhase == .active {
+                        #if os(watchOS)
+                        alarmScheduler?.onAppForeground()
+                        #endif
+                    }
                 }
         }
     }
