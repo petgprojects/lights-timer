@@ -229,6 +229,7 @@ WatchLogArchiveService            (all injected as @Environment)
 - `SmartWakeCoordinator.firedToday: [UUID: Date]` — one trigger per schedule per calendar day.
 - `SmartWakeCoordinator.processedHandoffs[triggerID]` — timestamped handoff records; duplicate deliveries resend the same ownership ack instead of reprocessing. Entries are pruned after 24 hours and capped at 256 by oldest-first eviction.
 - Trigger freshness gate — triggers older than 2 hours or more than 2 minutes in the future are rejected before occurrence matching.
+- `SmartAlarmScheduler.completedWakeOccurrence` — after a wake is triggered, stopped, or fails, the watch marks that specific `(scheduleID, wakeUpTime)` occurrence as completed and candidate selection skips it, so post-cleanup reevaluation advances to the next eligible wake instead of re-arming the same occurrence.
 - `ScheduleEngine.isRunning` guard — no second phone-side ramp if one is active.
 - Production smart wake no longer uses `lightsHandledOnWatch` to short-circuit the phone path; only explicit watch test mode still sets it.
 - Watch haptic timer auto-stops after 60s; `stopHaptics()` cancels early if `stopMonitoring()` is called.

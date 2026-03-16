@@ -232,7 +232,7 @@ final class SmartWakeCoordinator {
                 -Double(schedule.smartWakeWindowMinutes) * 60
             )
 
-            if triggerDate >= windowStart && triggerDate < wakeUpTime {
+            if triggerDate >= windowStart && triggerDate <= wakeUpTime {
                 return (wakeUpTime, windowStart)
             }
         }

@@ -51,18 +51,34 @@ final class WakeHeuristicEngine {
             log("Historical seed contained no samples", level: .warning)
             return
         }
-        heartRateSamples.append(contentsOf: samples)
+        let now = Date()
+        let maxDate = now.addingTimeInterval(120)
+        let validSamples = samples.filter { $0.date <= maxDate }
+        let rejectedCount = samples.count - validSamples.count
+        if rejectedCount > 0 {
+            log("Rejected \(rejectedCount) historical sample(s) with future dates", level: .warning)
+        }
+        guard !validSamples.isEmpty else {
+            log("All \(samples.count) historical sample(s) had future dates — seed discarded", level: .warning)
+            return
+        }
+        heartRateSamples.append(contentsOf: validSamples)
         heartRateSamples.sort { $0.date < $1.date }
         latestHeartRate = heartRateSamples.last?.bpm
-        if let firstSample = samples.first, let lastSample = samples.last {
+        if let firstSample = validSamples.first, let lastSample = validSamples.last {
             log(
-                "Seeded \(samples.count) heart-rate sample(s) spanning \(formatDate(firstSample.date)) -> \(formatDate(lastSample.date))"
+                "Seeded \(validSamples.count) heart-rate sample(s) spanning \(formatDate(firstSample.date)) -> \(formatDate(lastSample.date))"
             )
         }
         refreshMetrics(referenceDate: referenceDate)
     }
 
     func addHeartRateSample(bpm: Double, date: Date = Date()) {
+        let now = Date()
+        guard date <= now.addingTimeInterval(120) else {
+            log("Rejected heart-rate sample with future date \(formatDate(date)) (now=\(formatDate(now)))", level: .warning)
+            return
+        }
         heartRateSamples.append((date: date, bpm: bpm))
         heartRateSamples.sort { $0.date < $1.date }
         latestHeartRate = heartRateSamples.last?.bpm
@@ -93,14 +109,15 @@ final class WakeHeuristicEngine {
     }
 
     private func freezeBaselineIfNeeded(referenceDate: Date) {
+        let now = Date()
         guard baselineFrozenAt == nil,
               let wakeWindowStart,
-              referenceDate >= wakeWindowStart else { return }
+              now >= wakeWindowStart else { return }
 
-        recomputeBaseline(referenceDate: referenceDate)
-        baselineFrozenAt = referenceDate
+        recomputeBaseline(referenceDate: now)
+        baselineFrozenAt = now
         log(
-            "Baseline frozen at \(formatDate(referenceDate)). ready=\(baselineReady) baseline=\(formatBPM(baselineHeartRate)) samples=\(baselineSampleCount)"
+            "Baseline frozen at \(formatDate(now)). ready=\(baselineReady) baseline=\(formatBPM(baselineHeartRate)) samples=\(baselineSampleCount)"
         )
     }
 
