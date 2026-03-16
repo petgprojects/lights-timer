@@ -47,6 +47,7 @@ final class WatchLogArchiveService {
 
     func importTransferredLog(from temporaryURL: URL, metadata: [String: Any]?) {
         ensureLogsDirectory()
+        defer { try? fileManager.removeItem(at: temporaryURL) }
 
         let proposedFileName = (metadata?["filename"] as? String) ?? temporaryURL.lastPathComponent
         let destinationURL = logsDirectoryURL.appendingPathComponent(proposedFileName)

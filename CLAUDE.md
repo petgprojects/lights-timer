@@ -42,6 +42,7 @@ Models/
   SmartWakeMessage.swift           Codable message types + WCMessageKey constants + HapticPattern enum
 
 Views/
+  ChunkedLogTextView.swift         Chunked lazy log renderer for large iPhone/watch-imported log files
   ScheduleListView.swift           Schedule list, enable toggle, smart wake badge, debug trigger (swipe right), toolbar entry points for add + settings
   SettingsView.swift               iPhone settings screen with collapsible Phone Logs, Watch Logs, and Smart Wake Debug sections
   ScheduleDetailView.swift         Schedule editor form, smart wake toggle + window stepper + haptic pattern picker
@@ -56,7 +57,7 @@ Services/
   LightController.swift            @Observable, multi-light batch writes via HomeKitService + best-effort write summaries + persisted failure logging
   PhoneLogStore.swift              @Observable, persists an always-on iPhone runtime log plus per-launch log files in Application Support, mirrors app-generated phone logs to disk and console, and exposes metadata for in-app viewing/sharing
   ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HMTimerTrigger scenes + smart wake ownership-commit ramp execution + HomeKit retry debug state + persisted phone logging for ramp/scene decisions
-  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks, receives transferred watch log files, and logs WCSession state/messages
+  WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches latest schedule sync payload, suppresses unchanged app-context resends, retries after activation/watch-state changes, sends light-handoff acks, stages transferred watch log files immediately for import, and logs WCSession state/messages
   SmartWakeCoordinator.swift       @Observable, validates fresh watch triggers against the matching occurrence, keeps bounded handoff dedupe, decides phone vs watch light ownership, and logs trigger/handoff decisions to phone files
   HealthKitAuthorizationService.swift  @Observable, tracks watch health permission status (no direct HealthKit usage on iPhone) and logs watch-status changes to phone files
   WatchLogArchiveService.swift     @Observable, stores watch-transferred smart-wake log files in iPhone Application Support for in-app viewing/sharing and logs import results
@@ -77,11 +78,12 @@ Models/
   SmartWakeMessage.swift           Codable message types (duplicated from iOS)
 
 Views/
+  ChunkedLogTextView.swift         Chunked lazy log renderer for large on-watch log files
   WatchRootView.swift              Status, schedule list, diagnostics, permission prompt, and log export shortcuts
   WatchLogArchiveView.swift        Watch-side viewer/share UI for the always-on runtime log plus saved smart-wake session logs
 
 Services/
-  WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, sends triggers, and transfers log files to iPhone
+  WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, sends triggers, and transfers immutable log snapshots to iPhone
   SmartWakeSessionController.swift @Observable NSObject, live HR monitoring + best-effort historical seeding, deferred watch-local HomeKit fallback modes, handoff tracking, and detailed smart-wake file logging
   SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, proactive workout session evaluator, schedules overnight wake monitoring with `start(at:)`, evaluates proactive workout start on foreground entry, and prepares per-session log files once the next wake is known
   WakeHeuristicEngine.swift        @Observable, frozen pre-window HR baseline, confidence scoring, trigger decision, and detailed baseline/evaluation diagnostics for the log file
@@ -211,7 +213,7 @@ WatchLogArchiveService            (all injected as @Environment)
    - open logs directly on the watch
    - share logs from the watch share sheet
    - queue logs for paired-iPhone transfer
-6. `WatchSessionManager.transferLogFile` uses `WCSession.transferFile` with metadata naming the log file.
+6. `WatchSessionManager.transferLogFile` first snapshots the selected watch log into a dedicated transfer-staging directory, then uses `WCSession.transferFile` with metadata naming the original log file. This keeps the live runtime/session logs in Application Support untouched so they can be resent later.
 7. `WatchLogArchiveService` stores incoming files on the iPhone and `WatchLogArchiveView` lets the user read/share them later.
 
 ### Persistent iPhone Logs
@@ -267,7 +269,7 @@ WatchLogArchiveService            (all injected as @Environment)
   - `testTrigger` → `SmartWakeTriggerPayload` (bypasses validation on phone)
 - All use `[WCMessageKey.type: String, WCMessageKey.payload: Data]` envelope
 - `triggerID` correlates each trigger with its explicit phone→watch light-handoff ack.
-- Watch log files use `WCSession.transferFile` with metadata `{ kind: "smartWakeLog", filename: "<log>.log" }`; the iPhone copies them into `WatchLogArchiveService`.
+- Watch log files use `WCSession.transferFile` with metadata `{ kind: "smartWakeLog", filename: "<log>.log" }`; the watch sends an immutable snapshot copy, and the iPhone stages the received temporary file before importing it into `WatchLogArchiveService`.
 
 ## UI Structure
 
@@ -301,7 +303,7 @@ WatchLogArchiveService            (all injected as @Environment)
 Files placed in `Lights Timer/` automatically belong to the iOS target. Files in `Lights Timer Watch App/` automatically belong to the watch target. No need to manually add files to build phases.
 
 ### Shared Code Strategy
-`WatchScheduleSnapshot.swift` and `SmartWakeMessage.swift` are **duplicated** in both target directories. This is intentional — file-sync groups don't support cross-target membership. Keep both copies in sync when changing these types.
+`WatchScheduleSnapshot.swift`, `SmartWakeMessage.swift`, and `ChunkedLogTextView.swift` are **duplicated** in both target directories. This is intentional — file-sync groups don't support cross-target membership. Keep both copies in sync when changing these types.
 
 ### Concurrency Patterns
 - **HomeKit delegate callbacks** (`HMHomeManagerDelegate`): `nonisolated` + `MainActor.assumeIsolated` — works because HomeKit calls delegates on main thread.

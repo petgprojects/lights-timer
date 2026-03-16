@@ -23,6 +23,17 @@ enum SmartWakeLogLevel: String {
     case error = "ERROR"
 }
 
+enum SmartWakeLogTransferError: LocalizedError {
+    case missingSourceFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingSourceFile(let fileName):
+            return "The log file \(fileName) no longer exists on the watch."
+        }
+    }
+}
+
 @Observable
 final class SmartWakeLogStore {
     private(set) var availableLogs: [SmartWakeLogFile] = []
@@ -32,6 +43,8 @@ final class SmartWakeLogStore {
 
     private let fileManager = FileManager.default
     private let logsDirectoryURL: URL
+    private let transferSnapshotsDirectoryURL: URL
+    private let transferSnapshotRetentionInterval: TimeInterval = 7 * 24 * 60 * 60
     private let retainedLogLimit = 14
     private let runtimeLogFileName = "smartwake-runtime.log"
 
@@ -58,8 +71,14 @@ final class SmartWakeLogStore {
             in: .userDomainMask
         ).first ?? fileManager.temporaryDirectory
         logsDirectoryURL = appSupportURL.appendingPathComponent("SmartWakeLogs", isDirectory: true)
+        transferSnapshotsDirectoryURL = appSupportURL.appendingPathComponent(
+            "SmartWakeLogTransferSnapshots",
+            isDirectory: true
+        )
 
         ensureLogsDirectory()
+        ensureTransferSnapshotsDirectory()
+        pruneTransferSnapshots()
         refreshAvailableLogs()
         log("APP", "SmartWakeLogStore initialized")
     }
@@ -150,6 +169,26 @@ final class SmartWakeLogStore {
         lastTransferStatus = "Failed to transfer \(fileName): \(error)"
     }
 
+    func prepareTransferSnapshot(for fileURL: URL) throws -> URL {
+        ensureTransferSnapshotsDirectory()
+
+        let originalFileName = fileURL.lastPathComponent
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            throw SmartWakeLogTransferError.missingSourceFile(originalFileName)
+        }
+
+        let snapshotURL = transferSnapshotsDirectoryURL.appendingPathComponent(
+            "\(UUID().uuidString)-\(originalFileName)"
+        )
+        try fileManager.copyItem(at: fileURL, to: snapshotURL)
+        return snapshotURL
+    }
+
+    func cleanupTransferSnapshot(at url: URL) {
+        guard url.deletingLastPathComponent() == transferSnapshotsDirectoryURL else { return }
+        try? fileManager.removeItem(at: url)
+    }
+
     private func refreshAvailableLogs(selecting selectedURL: URL?) {
         ensureLogsDirectory()
 
@@ -222,6 +261,29 @@ final class SmartWakeLogStore {
             at: logsDirectoryURL,
             withIntermediateDirectories: true
         )
+    }
+
+    private func ensureTransferSnapshotsDirectory() {
+        try? fileManager.createDirectory(
+            at: transferSnapshotsDirectoryURL,
+            withIntermediateDirectories: true
+        )
+    }
+
+    private func pruneTransferSnapshots() {
+        let snapshotURLs = (try? fileManager.contentsOfDirectory(
+            at: transferSnapshotsDirectoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        let expirationDate = Date().addingTimeInterval(-transferSnapshotRetentionInterval)
+
+        for snapshotURL in snapshotURLs {
+            let values = try? snapshotURL.resourceValues(forKeys: [.contentModificationDateKey])
+            let modifiedAt = values?.contentModificationDate ?? .distantPast
+            guard modifiedAt < expirationDate else { continue }
+            try? fileManager.removeItem(at: snapshotURL)
+        }
     }
 
     private func writeLog(

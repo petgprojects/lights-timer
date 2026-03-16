@@ -43,28 +43,15 @@ struct WatchLogArchiveView: View {
 }
 
 private struct WatchLogDetailView: View {
-    @Environment(WatchLogArchiveService.self) private var watchLogArchive
-
     let logFile: ImportedWatchLogFile
 
-    @State private var contents = ""
-
     var body: some View {
-        ScrollView {
-            Text(verbatim: contents)
-                .font(.system(.caption2, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 8)
-        }
-        .padding(.horizontal)
+        ChunkedLogTextView(fileURL: logFile.url)
         .navigationTitle(logFile.displayName)
         .toolbar {
             ShareLink(item: logFile.url) {
                 Image(systemName: "square.and.arrow.up")
             }
-        }
-        .task {
-            contents = watchLogArchive.logContents(for: logFile)
         }
     }
 }

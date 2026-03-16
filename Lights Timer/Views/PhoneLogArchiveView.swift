@@ -68,28 +68,15 @@ struct PhoneLogArchiveView: View {
 }
 
 private struct PhoneLogDetailView: View {
-    @Environment(PhoneLogStore.self) private var phoneLogStore
-
     let logFile: PhoneLogFile
 
-    @State private var contents = ""
-
     var body: some View {
-        ScrollView {
-            Text(verbatim: contents)
-                .font(.system(.caption2, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 8)
-        }
-        .padding(.horizontal)
+        ChunkedLogTextView(fileURL: logFile.url)
         .navigationTitle(logFile.displayName)
         .toolbar {
             ShareLink(item: logFile.url) {
                 Image(systemName: "square.and.arrow.up")
             }
-        }
-        .task(id: logFile.id) {
-            contents = phoneLogStore.logContents(for: logFile)
         }
     }
 }

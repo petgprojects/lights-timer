@@ -102,16 +102,28 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
             return
         }
 
+        let fileName = url.lastPathComponent
         let metadata: [String: Any] = [
             "kind": "smartWakeLog",
-            "filename": url.lastPathComponent
+            "filename": fileName
         ]
-        session.transferFile(url, metadata: metadata)
-        logStore.noteQueuedTransfer(for: url)
-        logStore.log(
-            "CONNECTIVITY",
-            "Queued watch log transfer to iPhone: \(url.lastPathComponent)"
-        )
+
+        do {
+            let snapshotURL = try logStore.prepareTransferSnapshot(for: url)
+            session.transferFile(snapshotURL, metadata: metadata)
+            logStore.noteQueuedTransfer(for: url)
+            logStore.log(
+                "CONNECTIVITY",
+                "Queued watch log transfer to iPhone: \(fileName)"
+            )
+        } catch {
+            logStore.noteFailedTransfer(for: fileName, error: error.localizedDescription)
+            logStore.log(
+                "CONNECTIVITY",
+                "Failed to queue watch log transfer for \(fileName): \(error.localizedDescription)",
+                level: .error
+            )
+        }
     }
 
     private func sendRealtimeMessage<T: Codable>(_ payload: T, type: String) {
@@ -304,6 +316,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         Task { @MainActor in
             let fileName = (fileTransfer.file.metadata?["filename"] as? String)
                 ?? fileTransfer.file.fileURL.lastPathComponent
+            self.logStore.cleanupTransferSnapshot(at: fileTransfer.file.fileURL)
             if let error {
                 self.logStore.noteFailedTransfer(for: fileName, error: error.localizedDescription)
                 self.logStore.log(
