@@ -1,6 +1,8 @@
+import CoreTransferable
 import Foundation
+import UniformTypeIdentifiers
 
-struct SmartWakeLogFile: Identifiable, Hashable {
+struct SmartWakeLogFile: Identifiable, Hashable, Sendable {
     let id: String
     let fileName: String
     let url: URL
@@ -14,6 +16,17 @@ struct SmartWakeLogFile: Identifiable, Hashable {
 
     var sizeDescription: String {
         ByteCountFormatter.string(fromByteCount: sizeInBytes, countStyle: .file)
+    }
+}
+
+extension SmartWakeLogFile: Transferable {
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .plainText) { logFile in
+            SentTransferredFile(logFile.url)
+        }
+        .suggestedFileName { logFile in
+            logFile.fileName
+        }
     }
 }
 

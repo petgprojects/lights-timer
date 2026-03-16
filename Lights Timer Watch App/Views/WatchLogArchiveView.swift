@@ -60,7 +60,7 @@ private struct WatchLogDetailView: View {
         ChunkedLogTextView(fileURL: logFile.url)
         .navigationTitle(logFile.displayName)
         .toolbar {
-            ShareLink(item: logFile.url) {
+            ShareLink(item: logFile, preview: SharePreview(logFile.fileName)) {
                 Image(systemName: "square.and.arrow.up")
             }
         }

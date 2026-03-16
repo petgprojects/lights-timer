@@ -218,7 +218,7 @@ struct WatchRootView: View {
             }
 
             if let runtimeLog = logStore.runtimeLogFile {
-                ShareLink(item: runtimeLog.url) {
+                ShareLink(item: runtimeLog, preview: SharePreview(runtimeLog.fileName)) {
                     Label("Share Runtime Log", systemImage: "square.and.arrow.up")
                 }
 
@@ -242,7 +242,7 @@ struct WatchRootView: View {
             }
 
             if let latestSessionLog = logStore.latestSessionLog {
-                ShareLink(item: latestSessionLog.url) {
+                ShareLink(item: latestSessionLog, preview: SharePreview(latestSessionLog.fileName)) {
                     Label("Share Latest Session Log", systemImage: "doc.text")
                 }
 
