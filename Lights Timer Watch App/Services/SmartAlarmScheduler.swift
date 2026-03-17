@@ -6,6 +6,7 @@ enum SmartWakeArmingState: Equatable {
     case noUpcomingWake
     case armed(wakeUpTime: Date, monitoringStart: Date)
     case monitoringNow
+    case backstopActive(wakeUpTime: Date)
     case needsForegroundToArm(wakeUpTime: Date)
     case tooEarlyToArm(wakeUpTime: Date, earliestArmingDate: Date)
     case failed(message: String)
@@ -44,6 +45,7 @@ final class SmartAlarmScheduler: NSObject {
 
     private var extendedSession: WKExtendedRuntimeSession?
     private var pendingSchedule: PendingWake?
+    private var recoveredRunningBackstopWake: PendingWake?
 
     private var currentSessionScheduleID: UUID?
     private var currentSessionWakeTime: Date?
@@ -114,8 +116,9 @@ final class SmartAlarmScheduler: NSObject {
             )
         }
 
-        WKExtendedRuntimeSession.requestAutoLaunchAuthorizationStatus { [self] status, error in
-            Task { @MainActor in
+        WKExtendedRuntimeSession.requestAutoLaunchAuthorizationStatus { [weak self] status, error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 if let error = error as NSError? {
                     if error.domain == WKExtendedRuntimeSessionErrorDomain,
                        error.code == Int(
@@ -210,6 +213,7 @@ final class SmartAlarmScheduler: NSObject {
         case .scheduled:
             isAlarmSessionActive = false
             sessionController.isAlarmSessionActive = false
+            recoveredRunningBackstopWake = nil
             armingState = .armed(
                 wakeUpTime: record.wakeUpTime,
                 monitoringStart: record.baselineStart
@@ -224,6 +228,7 @@ final class SmartAlarmScheduler: NSObject {
             sessionController.isAlarmSessionActive = true
 
             if now < record.wakeUpTime {
+                recoveredRunningBackstopWake = nil
                 if sessionController.isMonitoringActive {
                     armingState = .monitoringNow
                     logStore.log(
@@ -247,12 +252,10 @@ final class SmartAlarmScheduler: NSObject {
                     )
                 }
             } else {
+                recoveredRunningBackstopWake = pendingWake(from: record)
                 pendingSchedule = nil
                 scheduledMonitoringDate = nil
-                armingState = .armed(
-                    wakeUpTime: record.wakeUpTime,
-                    monitoringStart: record.baselineStart
-                )
+                armingState = .backstopActive(wakeUpTime: record.wakeUpTime)
                 logStore.log(
                     "SCHEDULER",
                     "Recovered running session after wake time; keeping it as a backstop without restarting monitoring",
@@ -299,6 +302,12 @@ final class SmartAlarmScheduler: NSObject {
         }
 
         pruneCompletedWake()
+        let now = Date()
+
+        if preserveRecoveredRunningBackstopIfNeeded(now: now) {
+            return
+        }
+
         let smartWakeSchedules = schedules.filter(\.usesSmartWake)
 
         guard let nextOccurrence = findNextRelevantOccurrence(smartWakeSchedules) else {
@@ -345,8 +354,7 @@ final class SmartAlarmScheduler: NSObject {
             baselineStart: baselineStart,
             scheduledSessionStart: baselineStart
         )
-        let now = Date()
-        logStore.prepareSessionLog(
+        logStore.prepareSessionLogIfNeeded(
             schedule: nextSchedule,
             wakeUpTime: wakeUpTime,
             wakeWindowStart: windowStart,
@@ -587,6 +595,7 @@ final class SmartAlarmScheduler: NSObject {
         currentSessionScheduleID = schedule.id
         currentSessionWakeTime = wakeUpTime
         pendingSchedule = wake
+        recoveredRunningBackstopWake = nil
         savePendingWakeRecord(for: wake)
         session.start(at: date)
 
@@ -629,6 +638,7 @@ final class SmartAlarmScheduler: NSObject {
 
         extendedSession = nil
         pendingSchedule = nil
+        recoveredRunningBackstopWake = nil
         currentSessionScheduleID = nil
         currentSessionWakeTime = nil
         isAlarmSessionActive = false
@@ -677,6 +687,7 @@ final class SmartAlarmScheduler: NSObject {
         currentSessionWakeTime = wakeUpTime
 
         pendingSchedule = nil
+        recoveredRunningBackstopWake = nil
         scheduledMonitoringDate = nil
         alarmSessionError = nil
         armingState = .monitoringNow
@@ -781,6 +792,32 @@ final class SmartAlarmScheduler: NSObject {
         return pendingSchedule.matchesOccurrence(wake)
     }
 
+    private func preserveRecoveredRunningBackstopIfNeeded(now: Date) -> Bool {
+        guard let backstopWake = recoveredRunningBackstopWake,
+              let extendedSession,
+              extendedSession.state == .running,
+              now >= backstopWake.wakeUpTime,
+              !sessionController.isMonitoringActive,
+              sessionController.sessionState != .triggered else {
+            return false
+        }
+
+        currentSessionScheduleID = backstopWake.schedule.id
+        currentSessionWakeTime = backstopWake.wakeUpTime
+        scheduledMonitoringDate = nil
+        alarmSessionError = nil
+
+        if armingState != .backstopActive(wakeUpTime: backstopWake.wakeUpTime) {
+            logStore.log(
+                "SCHEDULER",
+                "Preserving recovered post-wake backstop session for '\(backstopWake.schedule.name)' until the session invalidates"
+            )
+        }
+
+        armingState = .backstopActive(wakeUpTime: backstopWake.wakeUpTime)
+        return true
+    }
+
     private func equivalentPersistedPendingWake(
         for wake: PendingWake,
         reason: String
@@ -814,6 +851,8 @@ final class SmartAlarmScheduler: NSObject {
             clearPersistedPendingWakeRecord(
                 reason: "\(reason); clearing stale persisted wake before waiting for foreground re-arm"
             )
+            pendingSchedule = nil
+            recoveredRunningBackstopWake = nil
             currentSessionScheduleID = nil
             currentSessionWakeTime = nil
             scheduledMonitoringDate = nil
@@ -831,7 +870,7 @@ final class SmartAlarmScheduler: NSObject {
         scheduledMonitoringDate = wake.scheduledSessionStart
         alarmSessionError = nil
 
-        logStore.prepareSessionLog(
+        logStore.prepareSessionLogIfNeeded(
             schedule: wake.schedule,
             wakeUpTime: wake.wakeUpTime,
             wakeWindowStart: wake.windowStart,
@@ -1004,6 +1043,7 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
             self.sessionController.isAlarmSessionActive = false
             self.extendedSession = nil
             self.scheduledMonitoringDate = nil
+            let invalidatedRecoveredBackstop = self.recoveredRunningBackstopWake
 
             if let error {
                 self.alarmSessionError = error.localizedDescription
@@ -1027,6 +1067,20 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                     "Extended runtime session invalidated but pending wake preserved — will re-arm on next foreground",
                     level: .warning
                 )
+            } else if let recoveredBackstop = invalidatedRecoveredBackstop {
+                self.clearPersistedPendingWakeRecord(
+                    reason: "Recovered post-wake backstop invalidated; clearing persisted wake record"
+                )
+                self.recoveredRunningBackstopWake = nil
+                self.currentSessionScheduleID = nil
+                self.currentSessionWakeTime = nil
+                self.armingState = .failed(message: "Recovered backstop session ended")
+                self.logStore.log(
+                    "SCHEDULER",
+                    "Recovered post-wake backstop invalidated for '\(recoveredBackstop.schedule.name)'; re-evaluating schedules",
+                    level: .warning
+                )
+                self.schedulesDidUpdate(self.sessionManager.activeSchedules)
             } else if self.sessionController.isMonitoringActive
                 || self.sessionController.sessionState == .triggered {
                 self.armingState = .monitoringNow

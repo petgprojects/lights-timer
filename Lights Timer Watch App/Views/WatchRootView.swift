@@ -360,6 +360,8 @@ struct WatchRootView: View {
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
                 return "Smart Wake armed for \(formatTime(wakeUpTime))"
+            case .backstopActive(let wakeUpTime):
+                return "Recovered Smart Wake backstop active for \(formatTime(wakeUpTime))"
             case .needsForegroundToArm(let wakeUpTime):
                 return "Open the watch app to arm Smart Wake for \(formatTime(wakeUpTime))"
             case .tooEarlyToArm(_, let earliestArmingDate):

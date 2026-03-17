@@ -153,6 +153,24 @@ final class SmartWakeLogStore {
         pruneLogsIfNeeded(excluding: logURL)
     }
 
+    @discardableResult
+    func prepareSessionLogIfNeeded(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        wakeWindowStart: Date,
+        reason: String
+    ) -> Bool {
+        let sessionKey = makeSessionKey(scheduleID: schedule.id, wakeUpTime: wakeUpTime)
+        guard activeSessionKey != sessionKey else { return false }
+        prepareSessionLog(
+            schedule: schedule,
+            wakeUpTime: wakeUpTime,
+            wakeWindowStart: wakeWindowStart,
+            reason: reason
+        )
+        return true
+    }
+
     func log(_ category: String, _ message: String, level: SmartWakeLogLevel = .info) {
         let line = makeLogLine(category: category, message: message, level: level)
         let runtimeURL = logsDirectoryURL.appendingPathComponent(runtimeLogFileName)
