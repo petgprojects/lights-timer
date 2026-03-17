@@ -6,6 +6,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var activeSchedules: [WatchScheduleSnapshot] = []
     var isPhoneReachable: Bool = false
     var lastLightHandoff: SmartWakeLightHandoffPayload?
+    private(set) var hasLoadedInitialScheduleContext = false
 
     /// Called whenever schedules are received (including from background WCSession delivery).
     var onSchedulesUpdated: (([WatchScheduleSnapshot]) -> Void)?
@@ -268,6 +269,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
             let schedules = try JSONDecoder().decode([WatchScheduleSnapshot].self, from: data)
             lastProcessedSchedulesPayload = data
             activeSchedules = schedules
+            hasLoadedInitialScheduleContext = true
             onSchedulesUpdated?(schedules)
             logStore.log(
                 "CONNECTIVITY",

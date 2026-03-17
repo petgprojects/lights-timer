@@ -149,6 +149,17 @@ struct WatchRootView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
+            LabeledContent("Auto-Launch") {
+                Text(autoLaunchStatusText)
+                    .font(.caption2)
+            }
+
+            if let autoLaunchMessage {
+                Text(autoLaunchMessage)
+                    .font(.caption2)
+                    .foregroundStyle(autoLaunchMessageColor)
+            }
+
             #if DEBUG
             if let nextWindow = sessionController.nextScheduledWakeWindowDescription {
                 LabeledContent("Next Window") {
@@ -374,6 +385,43 @@ struct WatchRootView: View {
             get: { logStore.runtimeDiagnosticsEnabled },
             set: { logStore.runtimeDiagnosticsEnabled = $0 }
         )
+    }
+
+    private var autoLaunchStatusText: String {
+        switch alarmScheduler.autoLaunchState {
+        case .authorized:
+            return "Enabled"
+        case .notAuthorized:
+            return "Off"
+        case .unsupported:
+            return "Unsupported"
+        case .unknown:
+            return "Unknown"
+        case .failed:
+            return "Error"
+        }
+    }
+
+    private var autoLaunchMessage: String? {
+        switch alarmScheduler.autoLaunchState {
+        case .notAuthorized:
+            return "Reduced resilience: watchOS may not relaunch the app automatically for alarm sessions."
+        case .failed(let message):
+            return message
+        default:
+            return nil
+        }
+    }
+
+    private var autoLaunchMessageColor: Color {
+        switch alarmScheduler.autoLaunchState {
+        case .notAuthorized:
+            return .orange
+        case .failed:
+            return .red
+        default:
+            return .secondary
+        }
     }
 
     private var currentSessionDescription: String? {

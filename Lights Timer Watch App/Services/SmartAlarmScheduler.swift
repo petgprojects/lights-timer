@@ -11,11 +11,27 @@ enum SmartWakeArmingState: Equatable {
     case failed(message: String)
 }
 
-private struct PendingWake {
+enum SmartWakeAutoLaunchState: Equatable {
+    case unknown
+    case authorized
+    case notAuthorized
+    case unsupported
+    case failed(message: String)
+}
+
+private struct PendingWake: Equatable {
     let schedule: WatchScheduleSnapshot
     let wakeUpTime: Date
     let windowStart: Date
     let baselineStart: Date
+    let scheduledSessionStart: Date
+
+    func matchesOccurrence(_ other: PendingWake) -> Bool {
+        schedule.id == other.schedule.id
+            && wakeUpTime == other.wakeUpTime
+            && windowStart == other.windowStart
+            && baselineStart == other.baselineStart
+    }
 }
 
 @Observable
@@ -24,6 +40,7 @@ final class SmartAlarmScheduler: NSObject {
     private(set) var scheduledMonitoringDate: Date?
     private(set) var alarmSessionError: String?
     private(set) var armingState: SmartWakeArmingState = .noUpcomingWake
+    private(set) var autoLaunchState: SmartWakeAutoLaunchState
 
     private var extendedSession: WKExtendedRuntimeSession?
     private var pendingSchedule: PendingWake?
@@ -39,6 +56,7 @@ final class SmartAlarmScheduler: NSObject {
     private let sessionController: SmartWakeSessionController
     private let sessionManager: WatchSessionManager
     private let logStore: SmartWakeLogStore
+    private let pendingWakeStore: SmartWakePendingWakeStore
 
     private let baselineCollectionLeadTime: TimeInterval = 3600
     private let armingHorizon: TimeInterval = 35 * 3600
@@ -46,11 +64,16 @@ final class SmartAlarmScheduler: NSObject {
     init(
         sessionController: SmartWakeSessionController,
         sessionManager: WatchSessionManager,
-        logStore: SmartWakeLogStore
+        logStore: SmartWakeLogStore,
+        pendingWakeStore: SmartWakePendingWakeStore = SmartWakePendingWakeStore()
     ) {
         self.sessionController = sessionController
         self.sessionManager = sessionManager
         self.logStore = logStore
+        self.pendingWakeStore = pendingWakeStore
+        self.autoLaunchState = Self.autoLaunchState(
+            from: pendingWakeStore.loadAutoLaunchState()
+        )
         super.init()
 
         sessionController.onTrigger = { [weak self] payload in
@@ -65,6 +88,198 @@ final class SmartAlarmScheduler: NSObject {
         }
         sessionController.onStateChange = { [weak self] state in
             self?.sessionManager.sendSessionState(state)
+        }
+
+        _ = loadPersistedPendingWakeRecord(
+            reason: "Scheduler initialization checked for stale pending wake"
+        )
+    }
+
+    // MARK: - Auto-Launch Authorization
+
+    func refreshAutoLaunchAuthorization(promptIfEligible: Bool) {
+        let shouldPrompt = promptIfEligible && !pendingWakeStore.autoLaunchPromptAttempted
+        let shouldRefreshStatus = shouldPrompt || pendingWakeStore.autoLaunchPromptAttempted
+
+        guard shouldRefreshStatus else {
+            autoLaunchState = Self.autoLaunchState(from: pendingWakeStore.loadAutoLaunchState())
+            return
+        }
+
+        if shouldPrompt {
+            pendingWakeStore.autoLaunchPromptAttempted = true
+            logStore.log(
+                "SCHEDULER",
+                "Requesting Smart Wake auto-launch authorization status (prompt eligible=true)"
+            )
+        }
+
+        WKExtendedRuntimeSession.requestAutoLaunchAuthorizationStatus { [self] status, error in
+            Task { @MainActor in
+                if let error = error as NSError? {
+                    if error.domain == WKExtendedRuntimeSessionErrorDomain,
+                       error.code == Int(
+                           WKExtendedRuntimeSessionErrorCode.unsupportedSessionType.rawValue
+                       ) {
+                        self.updateAutoLaunchState(
+                            .unsupported,
+                            persistedState: .unsupported
+                        )
+                        self.logStore.log(
+                            "SCHEDULER",
+                            "Smart Wake auto-launch authorization unsupported for this session type",
+                            level: .warning
+                        )
+                        return
+                    }
+
+                    self.autoLaunchState = .failed(message: error.localizedDescription)
+                    self.pendingWakeStore.saveAutoLaunchState(.unknown)
+                    self.logStore.log(
+                        "SCHEDULER",
+                        "Failed to refresh Smart Wake auto-launch authorization: \(error.localizedDescription)",
+                        level: .error
+                    )
+                    return
+                }
+
+                switch status {
+                case .active:
+                    self.updateAutoLaunchState(.authorized, persistedState: .authorized)
+                case .inactive:
+                    self.updateAutoLaunchState(.notAuthorized, persistedState: .notAuthorized)
+                case .unknown:
+                    self.updateAutoLaunchState(.unknown, persistedState: .unknown)
+                @unknown default:
+                    self.updateAutoLaunchState(.unknown, persistedState: .unknown)
+                }
+
+                self.logStore.log(
+                    "SCHEDULER",
+                    "Smart Wake auto-launch authorization refreshed. state=\(self.describeAutoLaunchState(self.autoLaunchState))"
+                )
+            }
+        }
+    }
+
+    // MARK: - Recovery
+
+    func attachRecoveredExtendedRuntimeSession(_ session: WKExtendedRuntimeSession) {
+        session.delegate = self
+        logStore.log(
+            "SCHEDULER",
+            "Attaching recovered extended runtime session. state=\(session.state.rawValue)"
+        )
+
+        guard let record = loadPersistedPendingWakeRecord(
+            reason: "Recovered extended runtime session looked up pending wake"
+        ) else {
+            logStore.log(
+                "SCHEDULER",
+                "Rejecting recovered extended runtime session because no valid pending wake record exists",
+                level: .error
+            )
+            invalidateRecoveredSession(
+                session,
+                failureMessage: "Recovered session had no pending wake record"
+            )
+            return
+        }
+
+        let now = Date()
+        guard now.timeIntervalSince(record.wakeUpTime) <= 7200 else {
+            logStore.log(
+                "SCHEDULER",
+                "Rejecting recovered extended runtime session because the pending wake is stale",
+                level: .error
+            )
+            invalidateRecoveredSession(
+                session,
+                failureMessage: "Recovered session was stale"
+            )
+            return
+        }
+
+        extendedSession = session
+        restorePendingWakeState(
+            from: record,
+            reason: "recovered extended runtime session"
+        )
+
+        switch session.state {
+        case .scheduled:
+            isAlarmSessionActive = false
+            sessionController.isAlarmSessionActive = false
+            armingState = .armed(
+                wakeUpTime: record.wakeUpTime,
+                monitoringStart: record.baselineStart
+            )
+            logStore.log(
+                "SCHEDULER",
+                "Recovered scheduled extended runtime session for '\(record.schedule.name)'; waiting for didStart"
+            )
+
+        case .running:
+            isAlarmSessionActive = true
+            sessionController.isAlarmSessionActive = true
+
+            if now < record.wakeUpTime {
+                if sessionController.isMonitoringActive {
+                    armingState = .monitoringNow
+                    logStore.log(
+                        "SCHEDULER",
+                        "Recovered running session while monitoring was already active"
+                    )
+                } else if sessionController.sessionState == .triggered {
+                    armingState = .monitoringNow
+                    logStore.log(
+                        "SCHEDULER",
+                        "Recovered running session after trigger; keeping it as the execution backstop"
+                    )
+                } else {
+                    logStore.log(
+                        "SCHEDULER",
+                        "Recovered running session before wake time; resuming monitoring immediately"
+                    )
+                    startMonitoringNow(
+                        schedule: record.schedule,
+                        wakeUpTime: record.wakeUpTime
+                    )
+                }
+            } else {
+                pendingSchedule = nil
+                scheduledMonitoringDate = nil
+                armingState = .armed(
+                    wakeUpTime: record.wakeUpTime,
+                    monitoringStart: record.baselineStart
+                )
+                logStore.log(
+                    "SCHEDULER",
+                    "Recovered running session after wake time; keeping it as a backstop without restarting monitoring",
+                    level: .warning
+                )
+            }
+
+        case .notStarted, .invalid:
+            logStore.log(
+                "SCHEDULER",
+                "Recovered session had unusable state=\(session.state.rawValue)",
+                level: .error
+            )
+            invalidateRecoveredSession(
+                session,
+                failureMessage: "Recovered session was unusable"
+            )
+        @unknown default:
+            logStore.log(
+                "SCHEDULER",
+                "Recovered session had unknown state=\(session.state.rawValue)",
+                level: .error
+            )
+            invalidateRecoveredSession(
+                session,
+                failureMessage: "Recovered session was unusable"
+            )
         }
     }
 
@@ -87,8 +302,29 @@ final class SmartAlarmScheduler: NSObject {
         let smartWakeSchedules = schedules.filter(\.usesSmartWake)
 
         guard let nextOccurrence = findNextRelevantOccurrence(smartWakeSchedules) else {
+            if !sessionManager.hasLoadedInitialScheduleContext,
+               let record = loadPersistedPendingWakeRecord(
+                   reason: "No schedules available before initial WCSession hydration"
+               ) {
+                restorePendingWakeState(
+                    from: record,
+                    reason: "preserving pending wake before initial WCSession hydration"
+                )
+                armingState = .armed(
+                    wakeUpTime: record.wakeUpTime,
+                    monitoringStart: record.baselineStart
+                )
+                alarmSessionError = nil
+                logStore.log(
+                    "SCHEDULER",
+                    "No upcoming schedules yet, but preserving the persisted pending wake until WCSession hydration completes",
+                    level: .warning
+                )
+                return
+            }
+
             logStore.log("SCHEDULER", "No upcoming smart wake schedules found", level: .warning)
-            cancelAlarmSession()
+            cancelAlarmSession(clearPersistedWake: true)
             armingState = .noUpcomingWake
             alarmSessionError = nil
             sessionController.updateNextScheduledWakeWindow(schedule: nil, wakeUpTime: nil)
@@ -106,7 +342,8 @@ final class SmartAlarmScheduler: NSObject {
             schedule: nextSchedule,
             wakeUpTime: wakeUpTime,
             windowStart: windowStart,
-            baselineStart: baselineStart
+            baselineStart: baselineStart,
+            scheduledSessionStart: baselineStart
         )
         let now = Date()
         logStore.prepareSessionLog(
@@ -120,7 +357,10 @@ final class SmartAlarmScheduler: NSObject {
             "Evaluating next schedule '\(nextSchedule.name)' now=\(formatTimestamp(now)) wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStart))"
         )
 
-        sessionController.updateNextScheduledWakeWindow(schedule: nextSchedule, wakeUpTime: wakeUpTime)
+        sessionController.updateNextScheduledWakeWindow(
+            schedule: nextSchedule,
+            wakeUpTime: wakeUpTime
+        )
 
         // Don't re-enter monitoring if a wake is already being handled
         if sessionController.isMonitoringActive,
@@ -135,7 +375,16 @@ final class SmartAlarmScheduler: NSObject {
         }
 
         if hasEquivalentArmedWake(for: nextWake) {
-            pendingSchedule = nextWake
+            let preservedSessionStart = scheduledMonitoringDate
+                ?? pendingSchedule?.scheduledSessionStart
+                ?? baselineStart
+            pendingSchedule = PendingWake(
+                schedule: nextSchedule,
+                wakeUpTime: wakeUpTime,
+                windowStart: windowStart,
+                baselineStart: baselineStart,
+                scheduledSessionStart: preservedSessionStart
+            )
             currentSessionScheduleID = nextSchedule.id
             currentSessionWakeTime = wakeUpTime
             alarmSessionError = nil
@@ -178,6 +427,26 @@ final class SmartAlarmScheduler: NSObject {
 
         let appState = WKApplication.shared().applicationState
         guard appState == .active else {
+            if let record = equivalentPersistedPendingWake(
+                for: nextWake,
+                reason: "Inactive-app guard checked persisted pending wake"
+            ) {
+                restorePendingWakeState(
+                    from: record,
+                    reason: "preserving equivalent pending wake while app is inactive"
+                )
+                armingState = .armed(
+                    wakeUpTime: wakeUpTime,
+                    monitoringStart: baselineStart
+                )
+                alarmSessionError = nil
+                logStore.log(
+                    "SCHEDULER",
+                    "Preserving equivalent recovered/persisted wake while the watch app is inactive"
+                )
+                return
+            }
+
             clearStaleArmedWakeIfNeeded(
                 comparedTo: nextWake,
                 reason: "Upcoming wake changed while the watch app was inactive"
@@ -225,7 +494,7 @@ final class SmartAlarmScheduler: NSObject {
             "SCHEDULER",
             "Monitoring cancelled — tearing down scheduler state"
         )
-        cancelAlarmSession()
+        cancelAlarmSession(clearPersistedWake: true)
 
         // Re-evaluate so the next occurrence gets scheduled. If the cancelled
         // wake is still in-window, completedWakeOccurrence blocks re-entry.
@@ -259,23 +528,17 @@ final class SmartAlarmScheduler: NSObject {
     private func cleanUpAfterCompletedWake() {
         logStore.log("SCHEDULER", "Post-trigger work complete — cleaning up scheduler state")
 
-        if let extendedSession,
-           extendedSession.state == .running || extendedSession.state == .scheduled {
+        let sessionToInvalidate = extendedSession
+        if let sessionToInvalidate,
+           sessionToInvalidate.state == .running || sessionToInvalidate.state == .scheduled {
             logStore.log(
                 "SCHEDULER",
-                "Invalidating extended runtime session (state=\(extendedSession.state.rawValue))"
+                "Invalidating extended runtime session (state=\(sessionToInvalidate.state.rawValue))"
             )
-            extendedSession.invalidate()
         }
 
-        extendedSession = nil
-        pendingSchedule = nil
-        currentSessionScheduleID = nil
-        currentSessionWakeTime = nil
-        isAlarmSessionActive = false
-        sessionController.isAlarmSessionActive = false
-        scheduledMonitoringDate = nil
-        alarmSessionError = nil
+        clearSchedulerState(clearPersistedWake: true, resetArmingState: true)
+        sessionToInvalidate?.invalidate()
 
         // Re-evaluate with the latest cached schedules so the next occurrence
         // gets scheduled immediately. Without this, the next wake would only
@@ -307,19 +570,24 @@ final class SmartAlarmScheduler: NSObject {
         windowStart: Date,
         baselineStart: Date
     ) {
-        cancelAlarmSession()
+        cancelAlarmSession(clearPersistedWake: true)
 
         let session = WKExtendedRuntimeSession()
         session.delegate = self
-        extendedSession = session
-        currentSessionScheduleID = schedule.id
-        currentSessionWakeTime = wakeUpTime
-        pendingSchedule = PendingWake(
+
+        let wake = PendingWake(
             schedule: schedule,
             wakeUpTime: wakeUpTime,
             windowStart: windowStart,
-            baselineStart: baselineStart
+            baselineStart: baselineStart,
+            scheduledSessionStart: date
         )
+
+        extendedSession = session
+        currentSessionScheduleID = schedule.id
+        currentSessionWakeTime = wakeUpTime
+        pendingSchedule = wake
+        savePendingWakeRecord(for: wake)
         session.start(at: date)
 
         scheduledMonitoringDate = date
@@ -331,9 +599,32 @@ final class SmartAlarmScheduler: NSObject {
         )
     }
 
-    private func cancelAlarmSession() {
-        if let extendedSession {
-            extendedSession.invalidate()
+    private func cancelAlarmSession(clearPersistedWake: Bool) {
+        let sessionToInvalidate = extendedSession
+        let invalidatedState = sessionToInvalidate?.state
+
+        clearSchedulerState(
+            clearPersistedWake: clearPersistedWake,
+            resetArmingState: true
+        )
+        sessionToInvalidate?.invalidate()
+
+        if let invalidatedState {
+            logStore.log(
+                "SCHEDULER",
+                "Cancelled any pending extended runtime session (previous state=\(invalidatedState.rawValue))"
+            )
+        } else {
+            logStore.log("SCHEDULER", "Cancelled any pending extended runtime session")
+        }
+    }
+
+    private func clearSchedulerState(
+        clearPersistedWake: Bool,
+        resetArmingState: Bool
+    ) {
+        if clearPersistedWake {
+            pendingWakeStore.clearPendingWakeRecord()
         }
 
         extendedSession = nil
@@ -344,8 +635,19 @@ final class SmartAlarmScheduler: NSObject {
         sessionController.isAlarmSessionActive = false
         scheduledMonitoringDate = nil
         alarmSessionError = nil
-        armingState = .noUpcomingWake
-        logStore.log("SCHEDULER", "Cancelled any pending extended runtime session")
+
+        if resetArmingState {
+            armingState = .noUpcomingWake
+        }
+    }
+
+    private func invalidateRecoveredSession(
+        _ session: WKExtendedRuntimeSession,
+        failureMessage: String
+    ) {
+        clearSchedulerState(clearPersistedWake: true, resetArmingState: false)
+        session.invalidate()
+        armingState = .failed(message: failureMessage)
     }
 
     private func startMonitoringNow(schedule: WatchScheduleSnapshot, wakeUpTime: Date) {
@@ -379,7 +681,8 @@ final class SmartAlarmScheduler: NSObject {
         alarmSessionError = nil
         armingState = .monitoringNow
 
-        sessionController.hapticPatternType = HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
+        sessionController.hapticPatternType =
+            HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
 
         Task {
             await sessionController.startMonitoring(
@@ -398,6 +701,21 @@ final class SmartAlarmScheduler: NSObject {
         return Self.timestampFormatter.string(from: date)
     }
 
+    private func describeAutoLaunchState(_ state: SmartWakeAutoLaunchState) -> String {
+        switch state {
+        case .unknown:
+            return "unknown"
+        case .authorized:
+            return "authorized"
+        case .notAuthorized:
+            return "notAuthorized"
+        case .unsupported:
+            return "unsupported"
+        case .failed:
+            return "failed"
+        }
+    }
+
     private static let timestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
@@ -410,7 +728,7 @@ final class SmartAlarmScheduler: NSObject {
     private func findNextRelevantOccurrence(
         _ schedules: [WatchScheduleSnapshot]
     ) -> (schedule: WatchScheduleSnapshot, wakeUpTime: Date)? {
-        return schedules
+        schedules
             .compactMap { schedule -> (WatchScheduleSnapshot, Date)? in
                 guard let wakeTime = nextWakeTime(for: schedule) else { return nil }
                 return (schedule, wakeTime)
@@ -460,27 +778,142 @@ final class SmartAlarmScheduler: NSObject {
             return false
         }
 
-        return pendingSchedule.schedule.id == wake.schedule.id
-            && pendingSchedule.wakeUpTime == wake.wakeUpTime
-            && pendingSchedule.windowStart == wake.windowStart
-            && pendingSchedule.baselineStart == wake.baselineStart
+        return pendingSchedule.matchesOccurrence(wake)
+    }
+
+    private func equivalentPersistedPendingWake(
+        for wake: PendingWake,
+        reason: String
+    ) -> SmartWakePendingWakeRecord? {
+        guard let record = loadPersistedPendingWakeRecord(reason: reason) else { return nil }
+        return pendingWake(from: record).matchesOccurrence(wake) ? record : nil
     }
 
     private func clearStaleArmedWakeIfNeeded(comparedTo wake: PendingWake, reason: String) {
-        guard let pendingSchedule,
-              pendingSchedule.schedule.id != wake.schedule.id
-                || pendingSchedule.wakeUpTime != wake.wakeUpTime
-                || pendingSchedule.windowStart != wake.windowStart
-                || pendingSchedule.baselineStart != wake.baselineStart else {
+        if let pendingSchedule, !pendingSchedule.matchesOccurrence(wake) {
+            logStore.log(
+                "SCHEDULER",
+                "\(reason); cancelling stale armed wake before waiting for foreground re-arm",
+                level: .warning
+            )
+            cancelAlarmSession(clearPersistedWake: true)
             return
         }
 
+        guard let record = loadPersistedPendingWakeRecord(reason: reason) else { return }
+        guard !pendingWake(from: record).matchesOccurrence(wake) else { return }
+
+        if extendedSession != nil {
+            logStore.log(
+                "SCHEDULER",
+                "\(reason); invalidating stale recovered wake before waiting for foreground re-arm",
+                level: .warning
+            )
+            cancelAlarmSession(clearPersistedWake: true)
+        } else {
+            clearPersistedPendingWakeRecord(
+                reason: "\(reason); clearing stale persisted wake before waiting for foreground re-arm"
+            )
+            currentSessionScheduleID = nil
+            currentSessionWakeTime = nil
+            scheduledMonitoringDate = nil
+        }
+    }
+
+    private func restorePendingWakeState(
+        from record: SmartWakePendingWakeRecord,
+        reason: String
+    ) {
+        let wake = pendingWake(from: record)
+        pendingSchedule = wake
+        currentSessionScheduleID = wake.schedule.id
+        currentSessionWakeTime = wake.wakeUpTime
+        scheduledMonitoringDate = wake.scheduledSessionStart
+        alarmSessionError = nil
+
+        logStore.prepareSessionLog(
+            schedule: wake.schedule,
+            wakeUpTime: wake.wakeUpTime,
+            wakeWindowStart: wake.windowStart,
+            reason: reason
+        )
+        sessionController.updateNextScheduledWakeWindow(
+            schedule: wake.schedule,
+            wakeUpTime: wake.wakeUpTime
+        )
+    }
+
+    private func pendingWake(from record: SmartWakePendingWakeRecord) -> PendingWake {
+        PendingWake(
+            schedule: record.schedule,
+            wakeUpTime: record.wakeUpTime,
+            windowStart: record.windowStart,
+            baselineStart: record.baselineStart,
+            scheduledSessionStart: record.scheduledSessionStart
+        )
+    }
+
+    private func savePendingWakeRecord(for wake: PendingWake) {
+        pendingWakeStore.savePendingWakeRecord(
+            SmartWakePendingWakeRecord(
+                schedule: wake.schedule,
+                wakeUpTime: wake.wakeUpTime,
+                windowStart: wake.windowStart,
+                baselineStart: wake.baselineStart,
+                scheduledSessionStart: wake.scheduledSessionStart,
+                savedAt: Date()
+            )
+        )
         logStore.log(
             "SCHEDULER",
-            "\(reason); cancelling stale armed wake before waiting for foreground re-arm",
-            level: .warning
+            "Persisted pending wake for '\(wake.schedule.name)' at \(formatTimestamp(wake.wakeUpTime))"
         )
-        cancelAlarmSession()
+    }
+
+    private func loadPersistedPendingWakeRecord(
+        reason: String
+    ) -> SmartWakePendingWakeRecord? {
+        guard let record = pendingWakeStore.loadPendingWakeRecord() else { return nil }
+
+        guard Date().timeIntervalSince(record.wakeUpTime) <= 7200 else {
+            clearPersistedPendingWakeRecord(
+                reason: "\(reason); pending wake record is stale"
+            )
+            return nil
+        }
+
+        return record
+    }
+
+    private func clearPersistedPendingWakeRecord(reason: String) {
+        guard pendingWakeStore.loadPendingWakeRecord() != nil else { return }
+        pendingWakeStore.clearPendingWakeRecord()
+        logStore.log("SCHEDULER", reason, level: .warning)
+    }
+
+    private func updateAutoLaunchState(
+        _ state: SmartWakeAutoLaunchState,
+        persistedState: PersistedSmartWakeAutoLaunchState
+    ) {
+        autoLaunchState = state
+        pendingWakeStore.saveAutoLaunchState(persistedState)
+    }
+
+    private static func autoLaunchState(
+        from persistedState: PersistedSmartWakeAutoLaunchState?
+    ) -> SmartWakeAutoLaunchState {
+        switch persistedState {
+        case .authorized:
+            return .authorized
+        case .notAuthorized:
+            return .notAuthorized
+        case .unsupported:
+            return .unsupported
+        case .unknown:
+            return .unknown
+        case nil:
+            return .unknown
+        }
     }
 }
 
@@ -594,7 +1027,8 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                     "Extended runtime session invalidated but pending wake preserved — will re-arm on next foreground",
                     level: .warning
                 )
-            } else if self.sessionController.isMonitoringActive || self.sessionController.sessionState == .triggered {
+            } else if self.sessionController.isMonitoringActive
+                || self.sessionController.sessionState == .triggered {
                 self.armingState = .monitoringNow
             } else if let error {
                 self.armingState = .failed(message: error.localizedDescription)
