@@ -4,20 +4,32 @@ import WatchKit
 #endif
 
 struct WatchRootView: View {
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
     @Environment(SmartWakeLogStore.self) private var logStore
     @Environment(WatchSessionManager.self) private var sessionManager
     @Environment(SmartWakeSessionController.self) private var sessionController
+    @Environment(SmartAlarmScheduler.self) private var alarmScheduler
 
     var body: some View {
-        @Bindable var sm = sessionManager
         NavigationStack {
-            List {
-                statusSection
-                schedulesSection(schedules: $sm.activeSchedules)
-                diagnosticsSection
-                logsSection
+            Group {
+                if isLuminanceReduced && isActiveSession {
+                    ambientMonitoringView
+                } else {
+                    fullView
+                }
             }
             .navigationTitle("Lights Timer")
+        }
+    }
+
+    private var fullView: some View {
+        @Bindable var sm = sessionManager
+        return List {
+            statusSection
+            schedulesSection(schedules: $sm.activeSchedules)
+            diagnosticsSection
+            logsSection
         }
     }
 
@@ -130,6 +142,12 @@ struct WatchRootView: View {
                     .font(.caption2)
                     .monospacedDigit()
             }
+
+            Toggle("Verbose Diagnostics", isOn: runtimeDiagnosticsBinding)
+
+            Text("Includes detailed heart-rate and heuristic logs. Increases file I/O and battery use.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
 
             #if DEBUG
             if let nextWindow = sessionController.nextScheduledWakeWindowDescription {
@@ -258,6 +276,9 @@ struct WatchRootView: View {
                     .font(.caption2)
             }
         }
+        .onAppear {
+            logStore.refreshAvailableLogsIfNeeded()
+        }
     }
 
     // MARK: - Actions
@@ -325,10 +346,20 @@ struct WatchRootView: View {
     private var statusSubtitle: String {
         switch sessionController.sessionState {
         case .idle:
-            if let next = nextScheduleDescription {
-                return "Next: \(next)"
+            switch alarmScheduler.armingState {
+            case .armed(let wakeUpTime, _):
+                return "Smart Wake armed for \(formatTime(wakeUpTime))"
+            case .needsForegroundToArm(let wakeUpTime):
+                return "Open the watch app to arm Smart Wake for \(formatTime(wakeUpTime))"
+            case .tooEarlyToArm(_, let earliestArmingDate):
+                return "Too early to arm this wake; reopen after \(formatDateTime(earliestArmingDate))"
+            case .noUpcomingWake:
+                return "No upcoming smart wake"
+            case .failed(let message):
+                return message
+            case .monitoringNow:
+                return "Monitoring start is in progress"
             }
-            return "No upcoming smart wake"
         case .monitoring:
             return "Watching for wake signals..."
         case .triggered:
@@ -338,15 +369,69 @@ struct WatchRootView: View {
         }
     }
 
-    private var nextScheduleDescription: String? {
-        guard let schedule = sessionManager.activeSchedules.first else { return nil }
+    private var runtimeDiagnosticsBinding: Binding<Bool> {
+        Binding(
+            get: { logStore.runtimeDiagnosticsEnabled },
+            set: { logStore.runtimeDiagnosticsEnabled = $0 }
+        )
+    }
+
+    private var currentSessionDescription: String? {
+        guard let schedule = sessionController.currentSchedule else { return nil }
         return "\(schedule.name) at \(schedule.wakeUpTimeString)"
     }
 
+    private var isActiveSession: Bool {
+        sessionController.sessionState == .monitoring || sessionController.sessionState == .triggered
+    }
+
+    private var ambientMonitoringView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.title2)
+                .foregroundStyle(.gray)
+            Text("Smart Wake Active")
+                .font(.caption)
+                .foregroundStyle(.gray)
+            if let desc = currentSessionDescription {
+                Text(desc)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func formatLogDate(_ date: Date) -> String {
+        Self.logDateFormatter.string(from: date)
+    }
+
+    private func formatTime(_ date: Date) -> String {
+        Self.timeFormatter.string(from: date)
+    }
+
+    private func formatDateTime(_ date: Date) -> String {
+        Self.dateTimeFormatter.string(from: date)
+    }
+
+    private static let logDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .short
         formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }

@@ -43,6 +43,9 @@ struct WatchLogArchiveView: View {
             }
         }
         .navigationTitle("Watch Logs")
+        .onAppear {
+            logStore.refreshAvailableLogsIfNeeded()
+        }
     }
 
     private func formatDate(_ date: Date) -> String {

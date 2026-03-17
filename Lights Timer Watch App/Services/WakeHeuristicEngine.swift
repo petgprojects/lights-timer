@@ -15,8 +15,11 @@ final class WakeHeuristicEngine {
     private(set) var baselineSampleCount = 0
     private(set) var baselineFrozenAt: Date?
     private(set) var hasTriggered = false
+    private var didLogBaselineNotReadyInWakeWindow = false
+    private var didLogAlreadyTriggeredRejection = false
 
     var logHandler: ((SmartWakeLogLevel, String) -> Void)?
+    var verboseDiagnosticsProvider: (() -> Bool)?
 
     // Configuration
     let hrRiseThreshold: Double = 5.0
@@ -147,7 +150,7 @@ final class WakeHeuristicEngine {
               lastDate.timeIntervalSince(firstDate) >= minimumBaselineSpan else {
             baselineHeartRate = nil
             baselineReady = false
-            log(
+            verboseLog(
                 "Baseline check at \(formatDate(referenceDate)): candidates=\(candidates.count) span=\(formatDuration(span)) window=\(formatDate(baselineStart)) -> \(formatDate(baselineEnd)) result=not ready",
                 level: .warning
             )
@@ -156,7 +159,7 @@ final class WakeHeuristicEngine {
 
         baselineHeartRate = median(candidates.map(\.bpm))
         baselineReady = baselineHeartRate != nil
-        log(
+        verboseLog(
             "Baseline check at \(formatDate(referenceDate)): candidates=\(candidates.count) span=\(formatDuration(span)) baseline=\(formatBPM(baselineHeartRate)) BPM result=\(baselineReady ? "ready" : "not ready")"
         )
     }
@@ -170,7 +173,7 @@ final class WakeHeuristicEngine {
             latestHRVStdDev = nil
             latestHRVScore = 0
             currentConfidence = 0
-            log(
+            verboseLog(
                 "Confidence update at \(formatDate(referenceDate)): baselineReady=\(baselineReady) latest=\(formatBPM(self.latestHeartRate)) confidence=0.000",
                 level: baselineReady ? .warning : .info
             )
@@ -203,7 +206,7 @@ final class WakeHeuristicEngine {
         latestHRVScore = hrvScore
 
         currentConfidence = hrScore + hrvScore
-        log(
+        verboseLog(
             "Confidence update at \(formatDate(referenceDate)): latest=\(formatBPM(latestHeartRate)) baseline=\(formatBPM(baselineHeartRate)) hrDelta=\(formatBPM(hrDelta)) hrScore=\(formatScore(hrScore)) hrvStdDev=\(formatBPM(latestHRVStdDev)) hrvScore=\(formatScore(hrvScore)) confidence=\(formatScore(currentConfidence))"
         )
     }
@@ -216,31 +219,37 @@ final class WakeHeuristicEngine {
         }
 
         guard inWakeWindow else {
-            log(
+            verboseLog(
                 "Wake evaluation at \(formatDate(now)): outside wake window -> not triggering"
             )
             return false
         }
 
         guard !hasTriggered else {
-            log(
-                "Wake evaluation at \(formatDate(now)): already triggered at \(formatDate(lastTriggerDate)) -> not triggering",
-                level: .warning
-            )
+            if !didLogAlreadyTriggeredRejection {
+                didLogAlreadyTriggeredRejection = true
+                log(
+                    "Wake evaluation at \(formatDate(now)): already triggered at \(formatDate(lastTriggerDate)) -> not triggering",
+                    level: .warning
+                )
+            }
             return false
         }
 
         guard baselineReady else {
-            log(
-                "Wake evaluation at \(formatDate(now)): baseline not ready (samples=\(baselineSampleCount), frozen=\(baselineFrozenAt != nil)) -> not triggering",
-                level: .warning
-            )
+            if !didLogBaselineNotReadyInWakeWindow {
+                didLogBaselineNotReadyInWakeWindow = true
+                log(
+                    "Wake evaluation at \(formatDate(now)): baseline not ready (samples=\(baselineSampleCount), frozen=\(baselineFrozenAt != nil)) -> not triggering",
+                    level: .warning
+                )
+            }
             return false
         }
 
         if let lastTriggerDate,
            now.timeIntervalSince(lastTriggerDate) < cooldownInterval {
-            log(
+            verboseLog(
                 "Wake evaluation at \(formatDate(now)): cooldown active after trigger at \(formatDate(lastTriggerDate)) -> not triggering",
                 level: .warning
             )
@@ -249,10 +258,13 @@ final class WakeHeuristicEngine {
 
         let shouldTrigger = currentConfidence >= confidenceThreshold
         let verdict = shouldTrigger ? "TRIGGER" : "WAIT"
-        log(
-            "Wake evaluation at \(formatDate(now)): latest=\(formatBPM(latestHeartRate)) baseline=\(formatBPM(baselineHeartRate)) hrDelta=\(formatBPM(latestHRDelta)) hrScore=\(formatScore(latestHRScore)) hrvStdDev=\(formatBPM(latestHRVStdDev)) hrvScore=\(formatScore(latestHRVScore)) confidence=\(formatScore(currentConfidence)) threshold=\(formatScore(confidenceThreshold)) -> \(verdict)",
-            level: shouldTrigger ? .info : .warning
-        )
+        let message =
+            "Wake evaluation at \(formatDate(now)): latest=\(formatBPM(latestHeartRate)) baseline=\(formatBPM(baselineHeartRate)) hrDelta=\(formatBPM(latestHRDelta)) hrScore=\(formatScore(latestHRScore)) hrvStdDev=\(formatBPM(latestHRVStdDev)) hrvScore=\(formatScore(latestHRVScore)) confidence=\(formatScore(currentConfidence)) threshold=\(formatScore(confidenceThreshold)) -> \(verdict)"
+        if shouldTrigger {
+            log(message)
+        } else {
+            verboseLog(message, level: .warning)
+        }
         return shouldTrigger
     }
 
@@ -277,6 +289,8 @@ final class WakeHeuristicEngine {
         currentConfidence = 0
         hasTriggered = false
         lastTriggerDate = nil
+        didLogBaselineNotReadyInWakeWindow = false
+        didLogAlreadyTriggeredRejection = false
     }
 
     // MARK: - Diagnostics
@@ -304,6 +318,11 @@ final class WakeHeuristicEngine {
 
     private func log(_ message: String, level: SmartWakeLogLevel = .info) {
         logHandler?(level, message)
+    }
+
+    private func verboseLog(_ message: String, level: SmartWakeLogLevel = .info) {
+        guard verboseDiagnosticsProvider?() ?? false else { return }
+        log(message, level: level)
     }
 
     private func formatDate(_ date: Date?) -> String {

@@ -59,7 +59,7 @@ final class SmartWakeSessionController: NSObject {
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
 
-    private var currentSchedule: WatchScheduleSnapshot?
+    private(set) var currentSchedule: WatchScheduleSnapshot?
     private var wakeUpTime: Date?
     private var windowStartTime: Date?
     private var activeTriggerID: UUID?
@@ -97,6 +97,9 @@ final class SmartWakeSessionController: NSObject {
         heuristicEngine.logHandler = { [weak self] level, message in
             self?.log("HEURISTIC", message, level: level)
         }
+        heuristicEngine.verboseDiagnosticsProvider = { [weak self] in
+            self?.logStore.runtimeDiagnosticsEnabled ?? false
+        }
         homeKitService.logHandler = { [weak self] level, message in
             self?.log("HOMEKIT", message, level: level)
         }
@@ -110,6 +113,7 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func queueActiveLogTransfer() {
+        logStore.refreshAvailableLogsIfNeeded()
         if let runtimeLogURL = logStore.runtimeLogFile?.url {
             onLogReadyToTransfer?(runtimeLogURL)
         }
@@ -250,9 +254,13 @@ final class SmartWakeSessionController: NSObject {
         notifyStateChange()
 
         if workoutSession != nil {
-            // Proactive workout session is already running — skip starting a new one
+            log("SESSION", "Tearing down stale workout state before fresh monitoring start", level: .warning)
+            await endWorkoutSession()
+        }
+
+        do {
+            try await startWorkoutSession()
             isWorkoutSessionRunning = true
-            log("SESSION", "Reusing proactive workout session for monitoring")
             startHeartRateQuery(from: Date())
             startWakeCheckTimer()
             checkForWakeTrigger()
@@ -261,26 +269,13 @@ final class SmartWakeSessionController: NSObject {
                 to: Date()
             )
             log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-        } else {
-            do {
-                try await startWorkoutSession()
-                isWorkoutSessionRunning = true
-                startHeartRateQuery(from: Date())
-                startWakeCheckTimer()
-                checkForWakeTrigger()
-                startHistoricalSeed(
-                    from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
-                    to: Date()
-                )
-                log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-            } catch {
-                log(
-                    "SESSION",
-                    "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
-                    level: .warning
-                )
-                startDegradedMonitoring()
-            }
+        } catch {
+            log(
+                "SESSION",
+                "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
+                level: .warning
+            )
+            startDegradedMonitoring()
         }
     }
 
@@ -522,28 +517,6 @@ final class SmartWakeSessionController: NSObject {
         log("HEALTHKIT", "Workout session ended")
     }
 
-    // MARK: - Proactive Workout Session
-
-    func startProactiveWorkoutSession() async throws {
-        guard workoutSession == nil else {
-            log("HEALTHKIT", "Proactive workout start skipped — workout session already exists")
-            return
-        }
-
-        log("HEALTHKIT", "Starting proactive workout session for background keep-alive")
-        try await startWorkoutSession()
-        isWorkoutSessionRunning = true
-        log("HEALTHKIT", "Proactive workout session started successfully")
-    }
-
-    func endProactiveWorkoutSession() {
-        guard workoutSession != nil, !isMonitoringActive else { return }
-        log("HEALTHKIT", "Ending proactive workout session")
-        Task { [weak self] in
-            await self?.endWorkoutSession()
-        }
-    }
-
     // MARK: - Degraded Monitoring
 
     private func startDegradedMonitoring() {
@@ -675,10 +648,12 @@ final class SmartWakeSessionController: NSObject {
 
             for sample in samples {
                 let bpm = sample.quantity.doubleValue(for: bpmUnit)
-                self.log(
-                    "HEALTHKIT",
-                    "Live heart-rate sample \(self.formatBPM(bpm)) BPM at \(self.formatTimestamp(sample.startDate))"
-                )
+                if self.logStore.runtimeDiagnosticsEnabled {
+                    self.log(
+                        "HEALTHKIT",
+                        "Live heart-rate sample \(self.formatBPM(bpm)) BPM at \(self.formatTimestamp(sample.startDate))"
+                    )
+                }
                 self.heuristicEngine.addHeartRateSample(bpm: bpm, date: sample.startDate)
             }
 

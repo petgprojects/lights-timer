@@ -2,15 +2,31 @@
 import Foundation
 import WatchKit
 
+enum SmartWakeArmingState: Equatable {
+    case noUpcomingWake
+    case armed(wakeUpTime: Date, monitoringStart: Date)
+    case monitoringNow
+    case needsForegroundToArm(wakeUpTime: Date)
+    case tooEarlyToArm(wakeUpTime: Date, earliestArmingDate: Date)
+    case failed(message: String)
+}
+
+private struct PendingWake {
+    let schedule: WatchScheduleSnapshot
+    let wakeUpTime: Date
+    let windowStart: Date
+    let baselineStart: Date
+}
+
 @Observable
 final class SmartAlarmScheduler: NSObject {
     private(set) var isAlarmSessionActive = false
     private(set) var scheduledMonitoringDate: Date?
     private(set) var alarmSessionError: String?
+    private(set) var armingState: SmartWakeArmingState = .noUpcomingWake
 
     private var extendedSession: WKExtendedRuntimeSession?
-    private var monitoringTimer: Timer?
-    private var pendingSchedule: (schedule: WatchScheduleSnapshot, wakeUpTime: Date, windowStart: Date)?
+    private var pendingSchedule: PendingWake?
 
     private var currentSessionScheduleID: UUID?
     private var currentSessionWakeTime: Date?
@@ -24,8 +40,8 @@ final class SmartAlarmScheduler: NSObject {
     private let sessionManager: WatchSessionManager
     private let logStore: SmartWakeLogStore
 
-    private let monitoringLeadTime: TimeInterval = 3600
-    private let proactiveWorkoutHorizon: TimeInterval = 43200  // 12 hours
+    private let baselineCollectionLeadTime: TimeInterval = 3600
+    private let armingHorizon: TimeInterval = 35 * 3600
 
     init(
         sessionController: SmartWakeSessionController,
@@ -73,6 +89,8 @@ final class SmartAlarmScheduler: NSObject {
         guard let nextOccurrence = findNextRelevantOccurrence(smartWakeSchedules) else {
             logStore.log("SCHEDULER", "No upcoming smart wake schedules found", level: .warning)
             cancelAlarmSession()
+            armingState = .noUpcomingWake
+            alarmSessionError = nil
             sessionController.updateNextScheduledWakeWindow(schedule: nil, wakeUpTime: nil)
             return
         }
@@ -82,6 +100,13 @@ final class SmartAlarmScheduler: NSObject {
 
         let windowStart = wakeUpTime.addingTimeInterval(
             -Double(nextSchedule.smartWakeWindowMinutes) * 60
+        )
+        let baselineStart = windowStart.addingTimeInterval(-baselineCollectionLeadTime)
+        let nextWake = PendingWake(
+            schedule: nextSchedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: windowStart,
+            baselineStart: baselineStart
         )
         let now = Date()
         logStore.prepareSessionLog(
@@ -100,6 +125,8 @@ final class SmartAlarmScheduler: NSObject {
         // Don't re-enter monitoring if a wake is already being handled
         if sessionController.isMonitoringActive,
            sessionController.currentScheduleID == nextSchedule.id {
+            armingState = .monitoringNow
+            scheduledMonitoringDate = nil
             logStore.log(
                 "SCHEDULER",
                 "Monitoring already active for '\(nextSchedule.name)'; skipping re-schedule"
@@ -107,101 +134,78 @@ final class SmartAlarmScheduler: NSObject {
             return
         }
 
-        if currentSessionScheduleID == nextSchedule.id,
-           currentSessionWakeTime == wakeUpTime,
-           let extendedSession,
-           extendedSession.state == .running || extendedSession.state == .scheduled {
+        if hasEquivalentArmedWake(for: nextWake) {
+            pendingSchedule = nextWake
+            currentSessionScheduleID = nextSchedule.id
+            currentSessionWakeTime = wakeUpTime
+            alarmSessionError = nil
+            armingState = .armed(wakeUpTime: wakeUpTime, monitoringStart: baselineStart)
             logStore.log(
                 "SCHEDULER",
-                "Extended runtime session already prepared for '\(nextSchedule.name)'; skipping duplicate scheduling"
+                "Extended runtime session already armed for '\(nextSchedule.name)'; refreshed pending payload without re-scheduling"
             )
             return
         }
 
-        if now >= windowStart && now < wakeUpTime {
+        if now >= baselineStart && now < wakeUpTime {
             logStore.log(
                 "SCHEDULER",
-                "Already inside the wake window for '\(nextSchedule.name)'; starting monitoring immediately"
+                "Already inside the monitoring period for '\(nextSchedule.name)'; starting monitoring immediately"
             )
-            monitoringTimer?.invalidate()
-            monitoringTimer = nil
             scheduledMonitoringDate = nil
             startMonitoringNow(schedule: nextSchedule, wakeUpTime: wakeUpTime)
             return
         }
 
-        // Schedule extended runtime session to fire at wakeTime - min(windowMinutes, 30) min
-        // This ensures the ~30 min execution window always covers wake time for force-fire + haptics
-        let sessionLeadSeconds = Double(min(nextSchedule.smartWakeWindowMinutes, 30)) * 60
-        let desiredSessionStart = max(wakeUpTime.addingTimeInterval(-sessionLeadSeconds), now.addingTimeInterval(1))
-        scheduleAlarmSession(
-            at: desiredSessionStart,
-            schedule: nextSchedule,
-            wakeUpTime: wakeUpTime,
-            windowStart: windowStart
-        )
-
-        // Evaluate proactive workout start if app is in foreground
-        evaluateProactiveWorkout(schedules)
-    }
-
-    // MARK: - Proactive Workout
-
-    func evaluateProactiveWorkout(_ schedules: [WatchScheduleSnapshot]) {
-        guard !sessionController.isWorkoutSessionRunning else { return }
-        guard sessionController.sessionState != .triggered else { return }
-
-        pruneCompletedWake()
-        let smartWakeSchedules = schedules.filter(\.usesSmartWake)
-        let now = Date()
-        let horizon = now.addingTimeInterval(proactiveWorkoutHorizon)
-
-        guard let nextOccurrence = findNextRelevantOccurrence(smartWakeSchedules),
-              nextOccurrence.wakeUpTime <= horizon else {
-            return
-        }
-
-        let nextSchedule = nextOccurrence.schedule
-        let wakeUpTime = nextOccurrence.wakeUpTime
-
-        let appState = WKApplication.shared().applicationState
-        guard appState == .active else {
+        if baselineStart.timeIntervalSince(now) > armingHorizon {
+            clearStaleArmedWakeIfNeeded(
+                comparedTo: nextWake,
+                reason: "Wake moved outside the 35-hour arming horizon"
+            )
+            armingState = .tooEarlyToArm(
+                wakeUpTime: wakeUpTime,
+                earliestArmingDate: baselineStart.addingTimeInterval(-armingHorizon)
+            )
+            scheduledMonitoringDate = nil
+            alarmSessionError = nil
             logStore.log(
                 "SCHEDULER",
-                "Proactive workout skipped — app not in foreground (state=\(appState.rawValue))"
+                "Wake '\(nextSchedule.name)' at \(formatTimestamp(wakeUpTime)) is beyond the 35-hour arming horizon; will re-evaluate later",
+                level: .warning
             )
             return
         }
 
-        let windowStart = wakeUpTime.addingTimeInterval(-Double(nextSchedule.smartWakeWindowMinutes) * 60)
-
-        logStore.log(
-            "SCHEDULER",
-            "Starting proactive workout session for '\(nextSchedule.name)' wake=\(formatTimestamp(wakeUpTime))"
-        )
-
-        Task {
-            do {
-                try await sessionController.startProactiveWorkoutSession()
-                // Schedule deferred monitoring start — workout-processing keeps us alive
-                scheduleMonitoringStart(
-                    schedule: nextSchedule,
-                    wakeUpTime: wakeUpTime,
-                    windowStart: windowStart
-                )
-            } catch {
-                logStore.log(
-                    "SCHEDULER",
-                    "Proactive workout session failed: \(error.localizedDescription)",
-                    level: .error
-                )
-            }
+        let appState = WKApplication.shared().applicationState
+        guard appState == .active else {
+            clearStaleArmedWakeIfNeeded(
+                comparedTo: nextWake,
+                reason: "Upcoming wake changed while the watch app was inactive"
+            )
+            armingState = .needsForegroundToArm(wakeUpTime: wakeUpTime)
+            scheduledMonitoringDate = nil
+            alarmSessionError = nil
+            logStore.log(
+                "SCHEDULER",
+                "Cannot arm extended runtime session — app is not active (state=\(appState.rawValue)). Will arm on next foreground.",
+                level: .warning
+            )
+            return
         }
+
+        let desiredSessionStart = max(baselineStart, now.addingTimeInterval(1))
+        scheduleAlarmSession(
+            at: desiredSessionStart,
+            schedule: nextSchedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: windowStart,
+            baselineStart: baselineStart
+        )
     }
 
     func onAppForeground() {
-        logStore.log("SCHEDULER", "App returned to foreground — re-evaluating proactive workout")
-        evaluateProactiveWorkout(sessionManager.activeSchedules)
+        logStore.log("SCHEDULER", "App returned to foreground — re-evaluating schedules")
+        schedulesDidUpdate(sessionManager.activeSchedules)
     }
 
     // MARK: - Monitoring Lifecycle
@@ -227,13 +231,11 @@ final class SmartAlarmScheduler: NSObject {
         // wake is still in-window, completedWakeOccurrence blocks re-entry.
         // If it's past, the next future occurrence gets scheduled.
         let latestSchedules = sessionManager.activeSchedules
-        if !latestSchedules.isEmpty {
-            logStore.log(
-                "SCHEDULER",
-                "Re-evaluating schedules after monitoring cancellation (\(latestSchedules.count) schedule(s))"
-            )
-            schedulesDidUpdate(latestSchedules)
-        }
+        logStore.log(
+            "SCHEDULER",
+            "Re-evaluating schedules after monitoring cancellation (\(latestSchedules.count) schedule(s))"
+        )
+        schedulesDidUpdate(latestSchedules)
     }
 
     /// Called immediately when the session controller fires a wake trigger.
@@ -244,9 +246,8 @@ final class SmartAlarmScheduler: NSObject {
             completedWakeOccurrence = (scheduleID, wakeTime)
         }
         pendingSchedule = nil
-        monitoringTimer?.invalidate()
-        monitoringTimer = nil
         scheduledMonitoringDate = nil
+        armingState = .monitoringNow
         logStore.log(
             "SCHEDULER",
             "Wake triggered — cleared pending monitoring state to prevent re-entry"
@@ -257,9 +258,6 @@ final class SmartAlarmScheduler: NSObject {
     /// Fully resets scheduler state so the next wake can be scheduled cleanly.
     private func cleanUpAfterCompletedWake() {
         logStore.log("SCHEDULER", "Post-trigger work complete — cleaning up scheduler state")
-
-        monitoringTimer?.invalidate()
-        monitoringTimer = nil
 
         if let extendedSession,
            extendedSession.state == .running || extendedSession.state == .scheduled {
@@ -285,13 +283,11 @@ final class SmartAlarmScheduler: NSObject {
         // foreground — both of which the phone suppresses if schedules haven't
         // changed (WatchConnectivityService.flushCachedSchedulesContext).
         let latestSchedules = sessionManager.activeSchedules
-        if !latestSchedules.isEmpty {
-            logStore.log(
-                "SCHEDULER",
-                "Re-evaluating schedules after wake completion (\(latestSchedules.count) schedule(s))"
-            )
-            schedulesDidUpdate(latestSchedules)
-        }
+        logStore.log(
+            "SCHEDULER",
+            "Re-evaluating schedules after wake completion (\(latestSchedules.count) schedule(s))"
+        )
+        schedulesDidUpdate(latestSchedules)
     }
 
     /// Clears stale completed-wake records (wake time > 2 hours in the past).
@@ -308,7 +304,8 @@ final class SmartAlarmScheduler: NSObject {
         at date: Date,
         schedule: WatchScheduleSnapshot,
         wakeUpTime: Date,
-        windowStart: Date
+        windowStart: Date,
+        baselineStart: Date
     ) {
         cancelAlarmSession()
 
@@ -317,22 +314,24 @@ final class SmartAlarmScheduler: NSObject {
         extendedSession = session
         currentSessionScheduleID = schedule.id
         currentSessionWakeTime = wakeUpTime
-        pendingSchedule = (schedule, wakeUpTime, windowStart)
+        pendingSchedule = PendingWake(
+            schedule: schedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: windowStart,
+            baselineStart: baselineStart
+        )
         session.start(at: date)
 
-        let monitoringStart = windowStart.addingTimeInterval(-monitoringLeadTime)
-        scheduledMonitoringDate = max(monitoringStart, date)
+        scheduledMonitoringDate = date
         alarmSessionError = nil
+        armingState = .armed(wakeUpTime: wakeUpTime, monitoringStart: baselineStart)
         logStore.log(
             "SCHEDULER",
-            "Scheduled extended runtime session for '\(schedule.name)' at \(formatTimestamp(date)). monitoringStart=\(formatTimestamp(scheduledMonitoringDate))"
+            "Scheduled extended runtime session for '\(schedule.name)' at \(formatTimestamp(date)). baselineStart=\(formatTimestamp(baselineStart))"
         )
     }
 
     private func cancelAlarmSession() {
-        monitoringTimer?.invalidate()
-        monitoringTimer = nil
-
         if let extendedSession {
             extendedSession.invalidate()
         }
@@ -344,40 +343,9 @@ final class SmartAlarmScheduler: NSObject {
         isAlarmSessionActive = false
         sessionController.isAlarmSessionActive = false
         scheduledMonitoringDate = nil
+        alarmSessionError = nil
+        armingState = .noUpcomingWake
         logStore.log("SCHEDULER", "Cancelled any pending extended runtime session")
-    }
-
-    // MARK: - HR Monitoring Start
-
-    private func scheduleMonitoringStart(
-        schedule: WatchScheduleSnapshot,
-        wakeUpTime: Date,
-        windowStart: Date
-    ) {
-        let monitoringStart = windowStart.addingTimeInterval(-monitoringLeadTime)
-        let now = Date()
-
-        if now >= monitoringStart {
-            logStore.log(
-                "SCHEDULER",
-                "Monitoring lead time already started for '\(schedule.name)'; beginning monitoring immediately"
-            )
-            startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
-            return
-        }
-
-        monitoringTimer?.invalidate()
-        let delay = monitoringStart.timeIntervalSince(now)
-        scheduledMonitoringDate = monitoringStart
-        monitoringTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.startMonitoringNow(schedule: schedule, wakeUpTime: wakeUpTime)
-            }
-        }
-        logStore.log(
-            "SCHEDULER",
-            "Scheduled HR monitoring start for '\(schedule.name)' at \(formatTimestamp(monitoringStart))"
-        )
     }
 
     private func startMonitoringNow(schedule: WatchScheduleSnapshot, wakeUpTime: Date) {
@@ -407,9 +375,9 @@ final class SmartAlarmScheduler: NSObject {
         currentSessionWakeTime = wakeUpTime
 
         pendingSchedule = nil
-        monitoringTimer?.invalidate()
-        monitoringTimer = nil
         scheduledMonitoringDate = nil
+        alarmSessionError = nil
+        armingState = .monitoringNow
 
         sessionController.hapticPatternType = HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
 
@@ -484,6 +452,36 @@ final class SmartAlarmScheduler: NSObject {
 
         return nil
     }
+
+    private func hasEquivalentArmedWake(for wake: PendingWake) -> Bool {
+        guard let pendingSchedule,
+              let extendedSession,
+              extendedSession.state == .scheduled || extendedSession.state == .running else {
+            return false
+        }
+
+        return pendingSchedule.schedule.id == wake.schedule.id
+            && pendingSchedule.wakeUpTime == wake.wakeUpTime
+            && pendingSchedule.windowStart == wake.windowStart
+            && pendingSchedule.baselineStart == wake.baselineStart
+    }
+
+    private func clearStaleArmedWakeIfNeeded(comparedTo wake: PendingWake, reason: String) {
+        guard let pendingSchedule,
+              pendingSchedule.schedule.id != wake.schedule.id
+                || pendingSchedule.wakeUpTime != wake.wakeUpTime
+                || pendingSchedule.windowStart != wake.windowStart
+                || pendingSchedule.baselineStart != wake.baselineStart else {
+            return
+        }
+
+        logStore.log(
+            "SCHEDULER",
+            "\(reason); cancelling stale armed wake before waiting for foreground re-arm",
+            level: .warning
+        )
+        cancelAlarmSession()
+    }
 }
 
 // MARK: - WKExtendedRuntimeSessionDelegate
@@ -505,12 +503,10 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
             self.sessionController.isAlarmSessionActive = true
             self.logStore.log("SCHEDULER", "Extended runtime session is now running")
 
-            // If monitoring is already active (proactive workout path), keep session
-            // as a background-execution backstop but don't restart monitoring.
             if self.sessionController.isMonitoringActive {
                 self.logStore.log(
                     "SCHEDULER",
-                    "Safety-net session started; monitoring already active via proactive workout — keeping as background-execution backstop"
+                    "Extended runtime session started while monitoring was already active; keeping it as a background-execution backstop"
                 )
                 return
             }
@@ -526,11 +522,7 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
             }
 
             if let pending = self.pendingSchedule {
-                self.scheduleMonitoringStart(
-                    schedule: pending.schedule,
-                    wakeUpTime: pending.wakeUpTime,
-                    windowStart: pending.windowStart
-                )
+                self.startMonitoringNow(schedule: pending.schedule, wakeUpTime: pending.wakeUpTime)
             }
         }
     }
@@ -578,6 +570,7 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
             self.isAlarmSessionActive = false
             self.sessionController.isAlarmSessionActive = false
             self.extendedSession = nil
+            self.scheduledMonitoringDate = nil
 
             if let error {
                 self.alarmSessionError = error.localizedDescription
@@ -592,6 +585,21 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                     "Extended runtime session invalidated. reason=\(reason.rawValue)",
                     level: .warning
                 )
+            }
+
+            if self.pendingSchedule != nil {
+                self.armingState = .failed(message: "Session lost — will re-arm on next foreground")
+                self.logStore.log(
+                    "SCHEDULER",
+                    "Extended runtime session invalidated but pending wake preserved — will re-arm on next foreground",
+                    level: .warning
+                )
+            } else if self.sessionController.isMonitoringActive || self.sessionController.sessionState == .triggered {
+                self.armingState = .monitoringNow
+            } else if let error {
+                self.armingState = .failed(message: error.localizedDescription)
+            } else {
+                self.armingState = .failed(message: "Extended runtime session invalidated")
             }
         }
     }
