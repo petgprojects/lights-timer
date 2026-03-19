@@ -265,7 +265,7 @@ final class SmartWakeSessionController: NSObject {
             startWakeCheckTimer()
             checkForWakeTrigger()
             startHistoricalSeed(
-                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
                 to: Date()
             )
             log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
@@ -530,9 +530,9 @@ final class SmartWakeSessionController: NSObject {
         startHeartRateQuery(from: Date())
         startWakeCheckTimer()
 
-        if let wakeUpTime {
+        if let windowStartTime {
             startHistoricalSeed(
-                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
                 to: Date()
             )
         }
@@ -669,6 +669,39 @@ final class SmartWakeSessionController: NSObject {
             Task { @MainActor [weak self] in
                 self?.checkForWakeTrigger()
             }
+        }
+    }
+
+    /// Called by the scheduler when the extended runtime session is about to
+    /// expire or has been invalidated. Runs an immediate wake check so the
+    /// watch can still force-fire before background execution is lost.
+    func forceImmediateWakeCheck() {
+        checkForWakeTrigger()
+    }
+
+    /// Clears monitoring state without marking the wake as completed, so a
+    /// later foreground pass can still re-arm the same occurrence if needed.
+    func tearDownMonitoringWithoutCompletion() {
+        log("SESSION", "Tearing down monitoring after session loss (occurrence not completed)")
+        tearDownMonitoringSession()
+        stopHaptics()
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = nil
+        lightRampTask?.cancel()
+        lightRampTask = nil
+        activeLocalRampTriggerID = nil
+        activeTriggerID = nil
+        activeTriggerSchedule = nil
+        activeTriggerDate = nil
+        activeTriggerWakeUpTime = nil
+        activeTriggerFallbackMode = nil
+        isMonitoringActive = false
+        isDegradedMode = false
+        sessionState = .idle
+        notifyStateChange()
+
+        Task { [weak self] in
+            await self?.endWorkoutSession()
         }
     }
 

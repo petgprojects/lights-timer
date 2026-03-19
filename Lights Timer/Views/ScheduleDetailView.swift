@@ -27,7 +27,7 @@ struct ScheduleDetailView: View {
     @State private var lightIdentifiers: [String] = []
     @State private var lightNames: [String] = []
     @State private var usesSmartWake: Bool = false
-    @State private var smartWakeWindowMinutes: Int = 30
+    @State private var smartWakeWindowMinutes: Int = 25
     @State private var hapticPattern: HapticPattern = .gentle
     @State private var isSaving: Bool = false
 
@@ -174,7 +174,7 @@ struct ScheduleDetailView: View {
                 Stepper(
                     "\(smartWakeWindowMinutes) min window",
                     value: $smartWakeWindowMinutes,
-                    in: 10...60,
+                    in: 10...25,
                     step: 5
                 )
 

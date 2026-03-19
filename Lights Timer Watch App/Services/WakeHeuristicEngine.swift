@@ -17,6 +17,11 @@ final class WakeHeuristicEngine {
     private(set) var hasTriggered = false
     private var didLogBaselineNotReadyInWakeWindow = false
     private var didLogAlreadyTriggeredRejection = false
+    /// Prevents baseline freeze until the historical seed has had a chance to
+    /// populate the baseline when monitoring starts inside the wake window.
+    var awaitingHistoricalSeed = false
+    private var awaitingSeedSince: Date?
+    private let seedTimeout: TimeInterval = 30
 
     var logHandler: ((SmartWakeLogLevel, String) -> Void)?
     var verboseDiagnosticsProvider: (() -> Bool)?
@@ -29,9 +34,9 @@ final class WakeHeuristicEngine {
     var currentConfidence: Double = 0
     var lastTriggerDate: Date?
 
-    private let baselineLookback: TimeInterval = 3600
+    private let baselineLookback: TimeInterval = 7200
     private let baselineCutoffBeforeWindow: TimeInterval = 300
-    private let minimumBaselineSamples = 8
+    private let minimumBaselineSamples = 5
     private let minimumBaselineSpan: TimeInterval = 900
     private let retainedHistoryWindow: TimeInterval = 7200
 
@@ -40,6 +45,8 @@ final class WakeHeuristicEngine {
     func configure(wakeWindowStart: Date) {
         reset()
         self.wakeWindowStart = wakeWindowStart
+        awaitingHistoricalSeed = true
+        awaitingSeedSince = Date()
         let baselineStart = wakeWindowStart.addingTimeInterval(-baselineLookback)
         let baselineEnd = wakeWindowStart.addingTimeInterval(-baselineCutoffBeforeWindow)
         log(
@@ -73,6 +80,8 @@ final class WakeHeuristicEngine {
                 "Seeded \(validSamples.count) heart-rate sample(s) spanning \(formatDate(firstSample.date)) -> \(formatDate(lastSample.date))"
             )
         }
+        awaitingHistoricalSeed = false
+        awaitingSeedSince = nil
         refreshMetrics(referenceDate: referenceDate)
     }
 
@@ -111,8 +120,23 @@ final class WakeHeuristicEngine {
         heartRateSamples.removeAll { $0.date < cutoff }
     }
 
-    private func freezeBaselineIfNeeded(referenceDate: Date) {
+    private func freezeBaselineIfNeeded(referenceDate _: Date) {
         let now = Date()
+
+        if awaitingHistoricalSeed {
+            if let since = awaitingSeedSince,
+               now.timeIntervalSince(since) > seedTimeout {
+                awaitingHistoricalSeed = false
+                awaitingSeedSince = nil
+                log(
+                    "Seed timeout (\(Int(seedTimeout))s) — proceeding with baseline freeze",
+                    level: .warning
+                )
+            } else {
+                return
+            }
+        }
+
         guard baselineFrozenAt == nil,
               let wakeWindowStart,
               now >= wakeWindowStart else { return }
@@ -291,6 +315,8 @@ final class WakeHeuristicEngine {
         lastTriggerDate = nil
         didLogBaselineNotReadyInWakeWindow = false
         didLogAlreadyTriggeredRejection = false
+        awaitingHistoricalSeed = false
+        awaitingSeedSince = nil
     }
 
     // MARK: - Diagnostics

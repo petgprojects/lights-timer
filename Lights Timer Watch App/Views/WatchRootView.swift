@@ -8,7 +8,9 @@ struct WatchRootView: View {
     @Environment(SmartWakeLogStore.self) private var logStore
     @Environment(WatchSessionManager.self) private var sessionManager
     @Environment(SmartWakeSessionController.self) private var sessionController
+    #if os(watchOS)
     @Environment(SmartAlarmScheduler.self) private var alarmScheduler
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -357,6 +359,7 @@ struct WatchRootView: View {
     private var statusSubtitle: String {
         switch sessionController.sessionState {
         case .idle:
+            #if os(watchOS)
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
                 return "Smart Wake armed for \(formatTime(wakeUpTime))"
@@ -373,6 +376,9 @@ struct WatchRootView: View {
             case .monitoringNow:
                 return "Monitoring start is in progress"
             }
+            #else
+            return "Smart Wake status unavailable in this build"
+            #endif
         case .monitoring:
             return "Watching for wake signals..."
         case .triggered:
@@ -390,6 +396,7 @@ struct WatchRootView: View {
     }
 
     private var autoLaunchStatusText: String {
+        #if os(watchOS)
         switch alarmScheduler.autoLaunchState {
         case .authorized:
             return "Enabled"
@@ -402,9 +409,13 @@ struct WatchRootView: View {
         case .failed:
             return "Error"
         }
+        #else
+        return "Unavailable"
+        #endif
     }
 
     private var autoLaunchMessage: String? {
+        #if os(watchOS)
         switch alarmScheduler.autoLaunchState {
         case .notAuthorized:
             return "Reduced resilience: watchOS may not relaunch the app automatically for alarm sessions."
@@ -413,9 +424,13 @@ struct WatchRootView: View {
         default:
             return nil
         }
+        #else
+        return nil
+        #endif
     }
 
     private var autoLaunchMessageColor: Color {
+        #if os(watchOS)
         switch alarmScheduler.autoLaunchState {
         case .notAuthorized:
             return .orange
@@ -424,6 +439,9 @@ struct WatchRootView: View {
         default:
             return .secondary
         }
+        #else
+        return .secondary
+        #endif
     }
 
     private var currentSessionDescription: String? {

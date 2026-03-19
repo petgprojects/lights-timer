@@ -8,19 +8,17 @@ struct LightsTimerWatchApp: App {
     @Environment(\.scenePhase) private var scenePhase
     #if os(watchOS)
     @WKExtensionDelegateAdaptor(WatchExtensionDelegate.self) private var extensionDelegate
-    #endif
-
     private let services = WatchAppServices.shared
+    #endif
 
     var body: some Scene {
         WindowGroup {
             WatchRootView()
+                #if os(watchOS)
                 .environment(services.logStore)
                 .environment(services.sessionManager)
                 .environment(services.sessionController)
-                #if os(watchOS)
                 .environment(services.alarmScheduler)
-                #endif
                 .task {
                     // Request HealthKit authorization
                     _ = await services.sessionController.requestAuthorization()
@@ -55,22 +53,23 @@ struct LightsTimerWatchApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     if newPhase == .active {
-                        #if os(watchOS)
                         services.alarmScheduler.refreshAutoLaunchAuthorization(
                             promptIfEligible: shouldPromptAutoLaunchAuthorization(
                                 for: services.sessionManager.activeSchedules
                             )
                         )
                         services.alarmScheduler.onAppForeground()
-                        #endif
                     }
                 }
+                #endif
         }
     }
 
+    #if os(watchOS)
     private func shouldPromptAutoLaunchAuthorization(
         for schedules: [WatchScheduleSnapshot]
     ) -> Bool {
         scenePhase == .active && schedules.contains(where: \.usesSmartWake)
     }
+    #endif
 }

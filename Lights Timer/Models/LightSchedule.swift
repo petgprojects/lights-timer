@@ -27,7 +27,7 @@ final class LightSchedule {
 
     // Smart Wake
     var usesSmartWake: Bool = false
-    var smartWakeWindowMinutes: Int = 30
+    var smartWakeWindowMinutes: Int = 25
     var hapticPatternRaw: String = "gentle"
     var lastSmartWakeTriggerAt: Date?
 
@@ -86,7 +86,7 @@ final class LightSchedule {
         startColorIsAdaptive: Bool = false,
         endColorIsAdaptive: Bool = false,
         usesSmartWake: Bool = false,
-        smartWakeWindowMinutes: Int = 30,
+        smartWakeWindowMinutes: Int = 25,
         hapticPatternRaw: String = "gentle"
     ) {
         self.id = UUID()

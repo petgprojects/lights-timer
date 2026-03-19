@@ -116,7 +116,7 @@ Assets.xcassets/                   AppIcon, AccentColor
 | lightIdentifiers | [String] | HomeKit accessory UUID strings |
 | lightNames | [String] | Display names (parallel array) |
 | usesSmartWake | Bool | Smart Wake enabled for this schedule |
-| smartWakeWindowMinutes | Int | Smart wake window (default 30) |
+| smartWakeWindowMinutes | Int | Smart wake window (default 25) |
 | hapticPatternRaw | String | Haptic pattern for watch alarm ("gentle"/"pulse"/"heartbeat"/"alarm") |
 | lastSmartWakeTriggerAt | Date? | Last smart wake fire time |
 | createdAt | Date | Creation timestamp |
@@ -194,19 +194,19 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 1. **No gradual ramp**: Smart wake schedules do NOT create per-minute background scenes or trigger foreground timers. Only a single fallback scene (`LT_<shortID>_fallback`) is created at the exact wake time, snapping lights to full brightness if the watch never triggers.
 2. iPhone sends `WatchScheduleSnapshot` array (including colors, `skipColorWrites`, `lightIdentifiers`, `lightNames`, and `hapticPatternRaw`) to watch via `WCSession.updateApplicationContext`. `WatchConnectivityService` caches the latest encoded payload, suppresses identical resends, and retries delivery only after WCSession activation/watch-state changes.
 3. **Bounded watch execution model** (extended runtime arming > just-in-time workout > HomeKit fallback scene):
-   - **Phase 1 — Overnight arming**: `SmartAlarmScheduler` computes `baselineStart = windowStart - 1h` and arms `WKExtendedRuntimeSession.start(at:)` for that time, not bedtime. The watch app must be active to arm, and `baselineStart` must be within a ~35-hour scheduling horizon. Successful arming persists a full `SmartWakePendingWakeRecord` in `UserDefaults`.
-   - **Recovery after relaunch**: If watchOS kills the process overnight and later relaunches it for the alarm session, `WatchExtensionDelegate.handle(_:)` synchronously passes the recovered session to `SmartAlarmScheduler.attachRecoveredExtendedRuntimeSession(_:)`. The scheduler restores the persisted wake record immediately, without waiting for WCSession, and resumes the owned alarm session on the shared service graph.
-   - **Phase 2 — Monitoring window**: When the extended runtime session starts, `SmartAlarmScheduler` immediately calls `startMonitoringNow()`. `SmartWakeSessionController` then starts a fresh `HKWorkoutSession`, anchored HR query, historical seed, and 10-second wake-check timer. The workout lifetime is bounded to the one-hour baseline period, the wake window, and post-trigger cleanup.
+   - **Phase 1 — Overnight arming**: `SmartAlarmScheduler` computes `sessionStart = max(windowStart - 2m, wakeUpTime - 25m)` and arms `WKExtendedRuntimeSession.start(at:)` there so the smart-alarm session budget covers the wake window and exact-wake fallback. The watch app must be active to arm, and `sessionStart` must be within a ~35-hour scheduling horizon. Successful arming persists a full `SmartWakePendingWakeRecord` in `UserDefaults`, and startup migration rewrites older persisted timing records to the new formula.
+   - **Recovery after relaunch**: If watchOS kills the process overnight and later relaunches it for the alarm session, `WatchExtensionDelegate.handle(_:)` synchronously passes the recovered session to `SmartAlarmScheduler.attachRecoveredExtendedRuntimeSession(_:)`. The scheduler restores the persisted wake record immediately, without waiting for WCSession, and resumes the owned alarm session on the shared service graph. If a recovered session is still scheduled too early, foreground reevaluation cancels and re-arms it, and `extendedRuntimeSessionDidStart` also attempts a best-effort re-schedule.
+   - **Phase 2 — Monitoring window**: When the extended runtime session starts, `SmartAlarmScheduler` immediately calls `startMonitoringNow()`. `SmartWakeSessionController` then starts a fresh `HKWorkoutSession`, anchored HR query, a historical seed query from `windowStart - 2h`, and a 10-second wake-check timer. The heuristic baseline now comes from historical HealthKit data instead of live pre-window collection, and baseline freeze is deferred until the seed completes or a 30-second timeout expires.
    - **Final backstop — HomeKit fallback scene**: The single `LT_<shortID>_fallback` scene at wake time snaps lights on if neither phone nor watch can own the wake.
-4. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated`), evaluates the next relevant schedule, creates/reuses a persistent per-session watch log file for that wake, records the next wake window for UI, refreshes the watch auto-launch authorization state, and exposes explicit `armingState` values: `.armed` (wake time in the subtitle; monitoring start kept separately), `.monitoringNow`, `.backstopActive` (a recovered post-wake session is still alive and being preserved as the execution backstop), `.needsForegroundToArm`, `.tooEarlyToArm`, `.failed`, or `.noUpcomingWake`.
+4. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated`), evaluates the next relevant schedule, creates/reuses a persistent per-session watch log file for that wake, records the next wake window for UI, refreshes the watch auto-launch authorization state, and exposes explicit `armingState` values: `.armed` (wake time in the subtitle; session start kept separately), `.monitoringNow`, `.backstopActive` (a recovered post-wake session is still alive and being preserved as the execution backstop), `.needsForegroundToArm`, `.tooEarlyToArm`, `.failed`, or `.noUpcomingWake`.
 5. If the app is inactive when new schedules arrive, the scheduler does not call `start(at:)`. Functionally equivalent recovered/persisted upcoming occurrences stay `.armed`, even before the first WCSession hydration completes; materially different upcoming occurrences cancel or clear the stale owned wake immediately and surface `.needsForegroundToArm` until the next foreground pass. Wakes beyond the arming horizon are intentionally deferred and surface `.tooEarlyToArm`.
 6. When monitoring starts, `SmartWakeSessionController` tears down any stale workout state and starts a fresh workout session. If the workout session fails (for example, watchOS refuses background workout startup), it switches to **degraded monitoring mode** (`isDegradedMode = true`): passive HR query + wake check timer remain active so force-fire + haptics work at wake time. This is strictly better than total failure.
 7. Seed failures are logged but do not fail monitoring.
 8. `WakeHeuristicEngine` uses a frozen pre-window baseline:
-   - Preferred baseline window: `windowStart - 60m` through `windowStart - 5m`
+   - Preferred baseline window: `windowStart - 120m` through `windowStart - 5m`
    - Statistic: median BPM
-   - Baseline is only ready after at least 8 samples spanning at least 15 minutes
-   - The baseline freezes at wake-window entry; if it never becomes ready, early triggering stays disabled and exact wake-time force-fire remains the backstop
+   - Baseline is only ready after at least 5 samples spanning at least 15 minutes
+   - The baseline freeze waits for the historical seed to complete (or a 30-second timeout) and then locks at or after wake-window entry; if it never becomes ready, early triggering stays disabled and exact wake-time force-fire remains the backstop
    - HR rise above baseline: 70% weight (normalized by 5 BPM threshold)
    - Short-term HRV (stddev of last 6 samples): 30% weight (normalized by 5 BPM)
    - Trigger threshold: confidence >= 0.6
@@ -224,6 +224,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 11. Early watch fallback starts at the same first visible/non-zero step the phone uses and never sends the all-off step. Exact wake-time fallback writes the final target light state immediately after a timeout or negative ack instead of running a dim-from-zero ramp.
 12. The watch log file captures scheduler decisions, historical seed results, trigger/handoff events, and every watch-local HomeKit write summary. Per-sample HR logs plus detailed baseline/confidence/wake-evaluation traces are available only when the watch runtime diagnostics flag is enabled.
 13. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the wake.
+14. `extendedRuntimeSessionWillExpire` and `extendedRuntimeSession(didInvalidateWith:)` both force an immediate wake check before background execution is lost. If invalidation happens before a trigger, monitoring is torn down without marking the occurrence completed so a later foreground rescue pass can still re-arm the same wake.
 
 ### Persistent Smart Wake Logs
 1. `SmartWakeLogStore` writes timestamped text logs to the watch app’s Application Support directory:
@@ -275,7 +276,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - Historical HR seed failure → live HR monitoring continues without the seed.
 - Workout session fails to start (background context) → degraded monitoring with passive HR query + wake check timer. Force-fire + haptics still work at wake time.
 - Workout session ends unexpectedly during monitoring → switches to degraded mode instead of failing. Monitoring stays alive.
-- Extended runtime session expires while a wake is pending → `extendedRuntimeSessionWillExpire` force-starts monitoring immediately. Unexpected invalidation before monitoring surfaces a failed arming state and retries on the next foreground pass.
+- Extended runtime session expiry/invalidation while a wake is pending → `extendedRuntimeSessionWillExpire` starts monitoring if needed or forces an immediate wake check if monitoring is already active. Unexpected invalidation during monitoring also forces a final wake check, then tears monitoring down without completing the occurrence so a foreground rescue pass can still re-arm it.
 - Stale/future-skewed triggers, triggers outside the matching occurrence window, disabled schedules, or phone ownership-commit failure → negative handoff ack to the watch so the watch can take over immediately or on its 8-second timeout.
 - If HomeKit homes are cold on the phone during background scene sync, `ScheduleEngine.hasPendingHomeKitRetry` is set and app-init wiring retries when `HomeKitService.onHomesUpdated` fires.
 
@@ -314,7 +315,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - Collapsible `Smart Wake Debug` disclosure section (`#if DEBUG`): last trigger result, last light owner, last background-scene sync status, pending HomeKit retry flag, and watch connection status
 
 ### ScheduleDetailView
-- Form sections: Name, Wake Up Time (wheel picker), Repeat (day circles), Lights (picker navigation), Lead Time (stepper 5-120 min), **Smart Wake** (toggle + window stepper 10-60 min), Target Brightness (slider), Light Colors (start/end color pickers + gradient)
+- Form sections: Name, Wake Up Time (wheel picker), Repeat (day circles), Lights (picker navigation), Lead Time (stepper 5-120 min), **Smart Wake** (toggle + window stepper 10-25 min to match the watch session budget), Target Brightness (slider), Light Colors (start/end color pickers + gradient)
 - Save triggers `scheduleEngine.onAppActive` + dismiss
 
 ### WatchRootView (watchOS)
@@ -425,6 +426,6 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 - If the watch cannot resolve the chosen lights by UUID, it falls back to `lightNames`; if both fail, the phone may already have declined ownership and the exact wake-time fallback scene becomes the safety net.
 - Phone log files mirror app-generated logs, not arbitrary iOS system/framework lines that Xcode may surface outside this app’s code.
 - Automatic watch→phone log transfer only happens when the watch explicitly queues files (for example after a completed/failed watch-owned wake path or when the user taps a send action in the Logs section); if you want the most complete picture, export the runtime log.
-- Watch monitoring still uses `HKWorkoutSession` during the bounded baseline/wake window, so Smart Wake consumes more battery near wake time than an idle watch app.
-- Smart Wake can only be newly armed while the watch app is active and the next `baselineStart` is within watchOS' scheduling horizon. Normal watchOS process evictions are recoverable through the persisted pending wake + `handle(_:)` recovery path, but user force-quit and device reboot are still outside scope.
+- Watch monitoring still uses `HKWorkoutSession` during the bounded wake-session window, so Smart Wake consumes more battery near wake time than an idle watch app.
+- Smart Wake can only be newly armed while the watch app is active and the next computed session start is within watchOS' scheduling horizon. Normal watchOS process evictions are recoverable through the persisted pending wake + `handle(_:)` recovery path, but user force-quit and device reboot are still outside scope.
 - SwiftData model changes (adding/removing fields) may require migration handling for existing user data.
