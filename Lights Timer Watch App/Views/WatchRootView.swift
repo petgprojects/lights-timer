@@ -15,7 +15,7 @@ struct WatchRootView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isLuminanceReduced && isActiveSession {
+                if isLuminanceReduced && isAmbientSleepModeActive {
                     ambientMonitoringView
                 } else {
                     fullView
@@ -520,12 +520,17 @@ struct WatchRootView: View {
     }
 
     private var currentSessionDescription: String? {
-        guard let schedule = sessionController.currentSchedule else { return nil }
-        return "\(schedule.name) at \(schedule.wakeUpTimeString)"
+        if let schedule = sessionController.currentSchedule {
+            return "\(schedule.name) at \(schedule.wakeUpTimeString)"
+        }
+
+        return sessionController.nextScheduledWakeWindowDescription
     }
 
-    private var isActiveSession: Bool {
-        sessionController.sessionState == .monitoring || sessionController.sessionState == .triggered
+    private var isAmbientSleepModeActive: Bool {
+        sessionController.isProactiveWorkoutRunning
+            || sessionController.sessionState == .monitoring
+            || sessionController.sessionState == .triggered
     }
 
     private var ambientMonitoringView: some View {

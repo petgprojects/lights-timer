@@ -79,7 +79,7 @@ Models/
 
 Views/
   ChunkedLogTextView.swift         Chunked lazy log renderer for large on-watch log files
-  WatchRootView.swift              Status + scheduler arming truth, schedule list, diagnostics (including auto-launch status, workout-session ownership state, last-HR telemetry, and the debug-only no-builder workout validation controls), ambient monitoring UI, permission prompt, and log export shortcuts
+  WatchRootView.swift              Status + scheduler arming truth, schedule list, diagnostics (including auto-launch status, workout-session ownership state, last-HR telemetry, and the debug-only no-builder workout validation controls), overnight ambient UI during proactive workout/monitoring, permission prompt, and log export shortcuts
   WatchLogArchiveView.swift        Watch-side viewer/share UI for the always-on runtime log plus saved smart-wake session logs
 
 Services/
