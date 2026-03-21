@@ -54,7 +54,13 @@ struct WatchRootView: View {
             if !sessionController.isHealthKitAuthorized {
                 Button("Grant Health Access") {
                     Task {
-                        await sessionController.requestAuthorization()
+                        _ = await sessionController.requestAuthorization()
+                        sessionManager.sendHeartRateStatus(
+                            active: sessionController.hasConfirmedHRAccess
+                        )
+                        #if os(watchOS)
+                        alarmScheduler.onAppForeground()
+                        #endif
                     }
                 }
                 .tint(.orange)
@@ -207,7 +213,7 @@ struct WatchRootView: View {
             }
 
             HStack {
-                Text("Workout Session")
+                Text(workoutSessionLabel)
                     .font(.caption)
                 Spacer()
                 Image(systemName: sessionController.isWorkoutSessionRunning ? "checkmark.circle.fill" : "xmark.circle")
@@ -227,6 +233,53 @@ struct WatchRootView: View {
                 Image(systemName: sessionController.isAlarmSessionActive ? "checkmark.circle.fill" : "moon.zzz")
                     .foregroundStyle(sessionController.isAlarmSessionActive ? .green : .secondary)
             }
+
+            #if DEBUG
+            LabeledContent("No-Builder Spike") {
+                Text(sessionController.noBuilderValidationStatus)
+                    .font(.caption2)
+            }
+
+            LabeledContent("Spike Samples") {
+                Text("\(sessionController.noBuilderValidationSampleCount)")
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Last Spike Sample") {
+                Text(sessionController.noBuilderValidationLastSampleDescription)
+                    .font(.caption2)
+            }
+
+            LabeledContent("2h Seed Probe") {
+                Text(sessionController.noBuilderValidationSeedProbeStatus)
+                    .font(.caption2)
+            }
+
+            if sessionController.isNoBuilderValidationActive {
+                Button("Run 2h Seed Probe") {
+                    Task {
+                        await sessionController.runNoBuilderValidationSeedProbe()
+                    }
+                }
+                .tint(.orange)
+
+                Button("Stop No-Builder Validation", role: .destructive) {
+                    sessionController.stopNoBuilderValidation()
+                }
+            } else {
+                Button("Start No-Builder Validation") {
+                    Task {
+                        await sessionController.startNoBuilderValidation()
+                    }
+                }
+                .tint(.orange)
+            }
+
+            Text("Debug-only spike: starts an HKWorkoutSession without a builder, keeps the anchored heart-rate query running, and logs sample cadence.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            #endif
 
             if let error = sessionController.errorMessage {
                 Text(error)
@@ -362,7 +415,8 @@ struct WatchRootView: View {
             #if os(watchOS)
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
-                return "Smart Wake armed for \(formatTime(wakeUpTime))"
+                let suffix = sessionController.isProactiveWorkoutRunning ? " (HR active)" : ""
+                return "Smart Wake armed for \(formatTime(wakeUpTime))\(suffix)"
             case .backstopActive(let wakeUpTime):
                 return "Recovered Smart Wake backstop active for \(formatTime(wakeUpTime))"
             case .needsForegroundToArm(let wakeUpTime):
@@ -386,6 +440,21 @@ struct WatchRootView: View {
         case .failed:
             return sessionController.errorMessage ?? "Unknown error"
         }
+    }
+
+    private var workoutSessionLabel: String {
+        #if DEBUG
+        if sessionController.isNoBuilderValidationActive {
+            return "Workout Session (spike)"
+        }
+        #endif
+        if sessionController.isProactiveWorkoutRunning {
+            return "Workout Session (overnight)"
+        }
+        if sessionController.isWorkoutSessionRunning {
+            return "Workout Session (monitoring)"
+        }
+        return "Workout Session"
     }
 
     private var runtimeDiagnosticsBinding: Binding<Bool> {

@@ -4,7 +4,7 @@ import Foundation
 final class HealthKitAuthorizationService {
     private let logStore: PhoneLogStore
 
-    var isAuthorizedOnWatch: Bool = false
+    var isHeartRateActiveOnWatch: Bool = false
     var statusMessage: String = "Checking..."
 
     init(logStore: PhoneLogStore) {
@@ -12,12 +12,14 @@ final class HealthKitAuthorizationService {
         log("HealthKit authorization service initialized")
     }
 
-    func updateFromWatch(authorized: Bool) {
-        isAuthorizedOnWatch = authorized
+    func updateFromWatch(heartRateActive: Bool) {
+        isHeartRateActiveOnWatch = heartRateActive
         updateStatusMessage(
-            authorized ? "Authorized on Apple Watch" : "Not authorized on Apple Watch"
+            heartRateActive
+                ? "Heart rate data active on Apple Watch"
+                : "Waiting for heart rate data from Apple Watch"
         )
-        log("Watch HealthKit authorization updated: authorized=\(authorized)")
+        log("Watch heart-rate status updated: active=\(heartRateActive)")
     }
 
     func updateFromConnectivity(watchPaired: Bool, watchInstalled: Bool, watchReachable: Bool) {

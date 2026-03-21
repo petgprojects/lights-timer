@@ -72,12 +72,12 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         sendRealtimeMessage(payload, type: WCMessageKey.testTrigger)
     }
 
-    func sendPermissionStatus(authorized: Bool) {
+    func sendHeartRateStatus(active: Bool) {
         guard let session else { return }
 
         do {
             let status = SmartWakePermissionStatus(
-                healthKitAuthorized: authorized,
+                heartRateDataActive: active,
                 watchConnected: true
             )
             let data = try JSONEncoder().encode(status)
@@ -85,13 +85,23 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 WCMessageKey.type: WCMessageKey.permissionStatus,
                 WCMessageKey.payload: data
             ]
+
             if session.isReachable {
-                session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+                session.sendMessage(message, replyHandler: nil) { [weak self] error in
+                    self?.logStore.log(
+                        "CONNECTIVITY",
+                        "sendMessage failed for heart rate status, falling back to transferUserInfo: \(error.localizedDescription)",
+                        level: .warning
+                    )
+                    session.transferUserInfo(message)
+                }
+            } else {
+                session.transferUserInfo(message)
             }
         } catch {
             logStore.log(
                 "CONNECTIVITY",
-                "Failed to send permission status: \(error.localizedDescription)",
+                "Failed to send heart rate status: \(error.localizedDescription)",
                 level: .error
             )
         }

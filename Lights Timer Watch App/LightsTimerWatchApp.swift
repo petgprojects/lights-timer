@@ -22,12 +22,12 @@ struct LightsTimerWatchApp: App {
                 .task {
                     // Request HealthKit authorization
                     _ = await services.sessionController.requestAuthorization()
-                    services.sessionManager.sendPermissionStatus(
-                        authorized: services.sessionController.isHealthKitAuthorized
+                    services.sessionManager.sendHeartRateStatus(
+                        active: services.sessionController.hasConfirmedHRAccess
                     )
                     services.logStore.log(
                         "APP",
-                        "Watch app task initialized. HealthKit authorized=\(services.sessionController.isHealthKitAuthorized)"
+                        "Watch app task initialized. promptCompleted=\(services.sessionController.isHealthKitAuthorized) hrDataAccessible=\(services.sessionController.hasConfirmedHRAccess)"
                     )
 
                     #if os(watchOS)
@@ -38,7 +38,14 @@ struct LightsTimerWatchApp: App {
                     )
 
                     // Evaluate any schedules already received before the view appeared
-                    if !services.sessionManager.activeSchedules.isEmpty {
+                    if scenePhase == .active {
+                        services.alarmScheduler.onAppForeground()
+                    } else if scenePhase == .inactive {
+                        services.logStore.log(
+                            "APP",
+                            "Deferring schedule evaluation — scenePhase is .inactive, .active onChange imminent"
+                        )
+                    } else if !services.sessionManager.activeSchedules.isEmpty {
                         services.alarmScheduler.schedulesDidUpdate(services.sessionManager.activeSchedules)
                     }
                     #endif
@@ -59,6 +66,8 @@ struct LightsTimerWatchApp: App {
                             )
                         )
                         services.alarmScheduler.onAppForeground()
+                    } else {
+                        services.alarmScheduler.onAppBackground()
                     }
                 }
                 #endif

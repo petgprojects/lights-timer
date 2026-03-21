@@ -49,8 +49,13 @@ struct SmartWakeSessionState: Codable {
 }
 
 struct SmartWakePermissionStatus: Codable {
-    let healthKitAuthorized: Bool
+    let heartRateDataActive: Bool
     let watchConnected: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case heartRateDataActive = "healthKitAuthorized"
+        case watchConnected
+    }
 }
 
 struct HapticPatternChangePayload: Codable {

@@ -31,6 +31,9 @@ final class WatchAppServices {
         sessionManager.onLightHandoff = { [weak self] payload in
             self?.sessionController.handleLightHandoff(payload)
         }
+        sessionController.onHRAccessConfirmed = { [weak self] in
+            self?.sessionManager.sendHeartRateStatus(active: true)
+        }
         sessionController.onLogReadyToTransfer = { [weak self] url in
             self?.sessionManager.transferLogFile(url)
         }

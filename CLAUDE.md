@@ -71,7 +71,7 @@ Assets.xcassets/                   AppIcon, AccentColor
 
 ### watchOS Target: `Lights Timer Watch App/`
 ```
-LightsTimerWatchApp.swift          @main App entry, injects `WatchAppServices.shared`, refreshes auto-launch status, and installs the watch extension delegate adaptor
+LightsTimerWatchApp.swift          @main App entry, injects `WatchAppServices.shared`, refreshes auto-launch status, drives `SmartAlarmScheduler.onAppForeground()` / `onAppBackground()` from SwiftUI scene phase, and installs the watch extension delegate adaptor
 
 Models/
   WatchScheduleSnapshot.swift      Codable mirror (duplicated from iOS — no shared target)
@@ -79,15 +79,15 @@ Models/
 
 Views/
   ChunkedLogTextView.swift         Chunked lazy log renderer for large on-watch log files
-  WatchRootView.swift              Status + scheduler arming truth, schedule list, diagnostics (including auto-launch status), ambient monitoring UI, permission prompt, and log export shortcuts
+  WatchRootView.swift              Status + scheduler arming truth, schedule list, diagnostics (including auto-launch status, workout-session ownership state, and the debug-only no-builder workout validation controls), ambient monitoring UI, permission prompt, and log export shortcuts
   WatchLogArchiveView.swift        Watch-side viewer/share UI for the always-on runtime log plus saved smart-wake session logs
 
 Services/
   WatchAppServices.swift           @MainActor singleton that owns the shared watch service graph for both SwiftUI and the extension delegate
   WatchExtensionDelegate.swift     WKExtensionDelegate recovery hook; synchronously hands recovered `WKExtendedRuntimeSession`s to the shared scheduler
   WatchSessionManager.swift        @Observable NSObject, WCSessionDelegate (watch side), receives schedules + phone handoff acks, dedupes activation/runtime app-context delivery, tracks whether initial schedule context has hydrated, sends triggers, and transfers immutable log snapshots to iPhone
-  SmartWakeSessionController.swift @Observable NSObject, just-in-time live HR monitoring + best-effort historical seeding, deferred watch-local HomeKit fallback modes, handoff tracking, degraded fallback monitoring, and diagnostics-gated smart-wake file logging
-  SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, persists the owned upcoming wake, recovers sessions after process relaunch, refreshes auto-launch status, and keeps the inactive-app guard recovery-aware
+  SmartWakeSessionController.swift @Observable NSObject, foreground-started proactive no-builder workout ownership, monitoring-session reuse/fallback, HR-access probing, bounded/deduplicated HR ingestion, deferred watch-local HomeKit fallback modes, diagnostics-gated smart-wake file logging, and the debug-only no-builder workout-session validation spike
+  SmartAlarmScheduler.swift        @Observable NSObject, WKExtendedRuntimeSession manager, persists the owned upcoming wake, recovers sessions after process relaunch, refreshes auto-launch status, tracks scene-phase-backed true foreground state, and keeps the inactive-app guard recovery-aware
   SmartWakePendingWakeStore.swift  UserDefaults wrapper for the persisted pending wake record plus auto-launch authorization flags/state
   WakeHeuristicEngine.swift        @Observable, frozen pre-window HR baseline, confidence scoring, trigger decision, and verbose baseline/evaluation diagnostics only when runtime diagnostics are enabled
   SmartWakeLogStore.swift          @Observable, persists an always-on watch runtime log plus per-session smart-wake log files in Application Support, lazily refreshes log metadata, tracks export status, and stores a runtime diagnostics flag available in non-debug builds
@@ -193,13 +193,14 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 ### Smart Wake (usesSmartWake == true)
 1. **No gradual ramp**: Smart wake schedules do NOT create per-minute background scenes or trigger foreground timers. Only a single fallback scene (`LT_<shortID>_fallback`) is created at the exact wake time, snapping lights to full brightness if the watch never triggers.
 2. iPhone sends `WatchScheduleSnapshot` array (including colors, `skipColorWrites`, `lightIdentifiers`, `lightNames`, and `hapticPatternRaw`) to watch via `WCSession.updateApplicationContext`. `WatchConnectivityService` caches the latest encoded payload, suppresses identical resends, and retries delivery only after WCSession activation/watch-state changes.
-3. **Bounded watch execution model** (extended runtime arming > just-in-time workout > HomeKit fallback scene):
+3. **Bounded watch execution model** (extended runtime arming > optional proactive no-builder workout > monitoring reuse/builder fallback > HomeKit fallback scene):
    - **Phase 1 — Overnight arming**: `SmartAlarmScheduler` computes `sessionStart = max(windowStart - 2m, wakeUpTime - 25m)` and arms `WKExtendedRuntimeSession.start(at:)` there so the smart-alarm session budget covers the wake window and exact-wake fallback. The watch app must be active to arm, and `sessionStart` must be within a ~35-hour scheduling horizon. Successful arming persists a full `SmartWakePendingWakeRecord` in `UserDefaults`, and startup migration rewrites older persisted timing records to the new formula.
+   - **Phase 1b — Foreground proactive workout start**: when the app is foregrounded and the monitoring start is within a 10-hour lead window, `SmartAlarmScheduler` calls `SmartWakeSessionController.preStartWorkoutSession()` to start a bare `HKWorkoutSession` with `.other` activity type and no `HKLiveWorkoutBuilder`. This primes `workout-processing` background execution and denser overnight HR sampling without saving a workout entry. The watch still shows an app-owned in-progress session indicator while this proactive session is running.
    - **Recovery after relaunch**: If watchOS kills the process overnight and later relaunches it for the alarm session, `WatchExtensionDelegate.handle(_:)` synchronously passes the recovered session to `SmartAlarmScheduler.attachRecoveredExtendedRuntimeSession(_:)`. The scheduler restores the persisted wake record immediately, without waiting for WCSession, and resumes the owned alarm session on the shared service graph. If a recovered session is still scheduled too early, foreground reevaluation cancels and re-arms it, and `extendedRuntimeSessionDidStart` also attempts a best-effort re-schedule.
-   - **Phase 2 — Monitoring window**: When the extended runtime session starts, `SmartAlarmScheduler` immediately calls `startMonitoringNow()`. `SmartWakeSessionController` then starts a fresh `HKWorkoutSession`, anchored HR query, a historical seed query from `windowStart - 2h`, and a 10-second wake-check timer. The heuristic baseline now comes from historical HealthKit data instead of live pre-window collection, and baseline freeze is deferred until the seed completes or a 30-second timeout expires.
+   - **Phase 2 — Monitoring window**: When the extended runtime session starts, `SmartAlarmScheduler` immediately calls `startMonitoringNow()`. If the proactive workout is still alive, `SmartWakeSessionController` reuses it for monitoring; otherwise it falls back to the existing builder-backed `startWorkoutSession()` attempt and enters degraded mode if watchOS refuses the background start. Monitoring starts an anchored HR query bounded to `wakeUpTime + 5m`, filters future-dated samples, deduplicates seed/live overlap by sample UUID, and seeds history from `windowStart - 2h`. The heuristic baseline now comes from historical HealthKit data instead of live pre-window collection, and baseline freeze is deferred until the seed completes or a 30-second timeout expires.
    - **Final backstop — HomeKit fallback scene**: The single `LT_<shortID>_fallback` scene at wake time snaps lights on if neither phone nor watch can own the wake.
 4. `SmartAlarmScheduler` receives schedules (via `WatchSessionManager.onSchedulesUpdated`), evaluates the next relevant schedule, creates/reuses a persistent per-session watch log file for that wake, records the next wake window for UI, refreshes the watch auto-launch authorization state, and exposes explicit `armingState` values: `.armed` (wake time in the subtitle; session start kept separately), `.monitoringNow`, `.backstopActive` (a recovered post-wake session is still alive and being preserved as the execution backstop), `.needsForegroundToArm`, `.tooEarlyToArm`, `.failed`, or `.noUpcomingWake`.
-5. If the app is inactive when new schedules arrive, the scheduler does not call `start(at:)`. Functionally equivalent recovered/persisted upcoming occurrences stay `.armed`, even before the first WCSession hydration completes; materially different upcoming occurrences cancel or clear the stale owned wake immediately and surface `.needsForegroundToArm` until the next foreground pass. Wakes beyond the arming horizon are intentionally deferred and surface `.tooEarlyToArm`.
+5. `SmartAlarmScheduler` treats true foreground as SwiftUI `scenePhase == .active`, not `WKApplication.shared().applicationState`, because watchOS reports `.active` during extended runtime execution. If the app is inactive when new schedules arrive, the scheduler does not call `start(at:)`. Functionally equivalent recovered/persisted upcoming occurrences stay `.armed`, even before the first WCSession hydration completes; materially different upcoming occurrences cancel or clear the stale owned wake immediately and surface `.needsForegroundToArm` until the next foreground pass. Wakes beyond the arming horizon are intentionally deferred and surface `.tooEarlyToArm`.
 6. When monitoring starts, `SmartWakeSessionController` tears down any stale workout state and starts a fresh workout session. If the workout session fails (for example, watchOS refuses background workout startup), it switches to **degraded monitoring mode** (`isDegradedMode = true`): passive HR query + wake check timer remain active so force-fire + haptics work at wake time. This is strictly better than total failure.
 7. Seed failures are logged but do not fail monitoring.
 8. `WakeHeuristicEngine` uses a frozen pre-window baseline:
@@ -224,7 +225,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 11. Early watch fallback starts at the same first visible/non-zero step the phone uses and never sends the all-off step. Exact wake-time fallback writes the final target light state immediately after a timeout or negative ack instead of running a dim-from-zero ramp.
 12. The watch log file captures scheduler decisions, historical seed results, trigger/handoff events, and every watch-local HomeKit write summary. Per-sample HR logs plus detailed baseline/confidence/wake-evaluation traces are available only when the watch runtime diagnostics flag is enabled.
 13. If no smart trigger arrives by wake time, watch force-fires at confidence 1.0. The single fallback scene at wake time remains the tertiary safety net if neither phone nor watch can own the wake.
-14. `extendedRuntimeSessionWillExpire` and `extendedRuntimeSession(didInvalidateWith:)` both force an immediate wake check before background execution is lost. If invalidation happens before a trigger, monitoring is torn down without marking the occurrence completed so a later foreground rescue pass can still re-arm the same wake.
+14. `extendedRuntimeSessionWillExpire` and `extendedRuntimeSession(didInvalidateWith:)` both force an immediate wake check before background execution is lost. This emergency path also covers the monitoring-startup gap: if startup has begun but `isMonitoringActive` has not committed yet, the controller bypasses the normal monitoring guard for exact-wake force-fire only. If invalidation happens before a trigger, monitoring is torn down without marking the occurrence completed so a later foreground rescue pass can still re-arm the same wake.
 
 ### Persistent Smart Wake Logs
 1. `SmartWakeLogStore` writes timestamped text logs to the watch app’s Application Support directory:
@@ -265,6 +266,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - **iPhone "Test Lights"** (swipe right on any schedule row): `ScheduleEngine.startTestExecution(for:)` runs the full light ramp from now to now + leadTimeMinutes. A "Stop" button appears in the running banner.
 - **Watch "Test Alarm"** (button per schedule in WatchRootView): plays the 60-second haptic ramp locally, starts the watch-local HomeKit ramp, and sends a `testTrigger` message to the phone. The phone starts a rapid smart-wake-style light ramp only if the watch did not already claim the lights.
 - **Haptic preview**: selecting a haptic pattern plays a preview vibration on both platforms (iOS: UIKit feedback generators; watchOS: `WKInterfaceDevice.play()`).
+- **Watch debug-only "No-Builder Validation"** (`#if DEBUG`, Diagnostics section): starts a bare `HKWorkoutSession` with no `HKLiveWorkoutBuilder`, runs the anchored HR query from the start time, logs per-sample cadence to the watch runtime log, exposes a manual 2-hour seed-query probe while the session is active, and stops cleanly without entering the Smart Wake monitoring workflow.
 
 ### Haptic Pattern Sync (Watch → Phone)
 - Watch haptic picker changes send `hapticPatternChanged` message via `WatchSessionManager.sendHapticPatternChange`.
@@ -276,7 +278,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - Historical HR seed failure → live HR monitoring continues without the seed.
 - Workout session fails to start (background context) → degraded monitoring with passive HR query + wake check timer. Force-fire + haptics still work at wake time.
 - Workout session ends unexpectedly during monitoring → switches to degraded mode instead of failing. Monitoring stays alive.
-- Extended runtime session expiry/invalidation while a wake is pending → `extendedRuntimeSessionWillExpire` starts monitoring if needed or forces an immediate wake check if monitoring is already active. Unexpected invalidation during monitoring also forces a final wake check, then tears monitoring down without completing the occurrence so a foreground rescue pass can still re-arm it.
+- Extended runtime session expiry/invalidation while a wake is pending → `extendedRuntimeSessionWillExpire` starts monitoring if needed or forces an immediate wake check if monitoring or monitoring startup is already in progress. Unexpected invalidation during monitoring/startup also forces a final wake check, then tears monitoring down without completing the occurrence so a foreground rescue pass can still re-arm it.
 - Stale/future-skewed triggers, triggers outside the matching occurrence window, disabled schedules, or phone ownership-commit failure → negative handoff ack to the watch so the watch can take over immediately or on its 8-second timeout.
 - If HomeKit homes are cold on the phone during background scene sync, `ScheduleEngine.hasPendingHomeKitRetry` is set and app-init wiring retries when `HomeKitService.onHomesUpdated` fires.
 
@@ -291,7 +293,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - Message types:
   - `smartWakeTriggered` → `SmartWakeTriggerPayload`
   - `sessionStateChanged` → `SmartWakeSessionState`
-  - `permissionStatus` → `SmartWakePermissionStatus`
+- `permissionStatus` → `SmartWakePermissionStatus` (`heartRateDataActive` + `watchConnected`)
   - `hapticPatternChanged` → `HapticPatternChangePayload` (scheduleID + new pattern)
   - `testTrigger` → `SmartWakeTriggerPayload` (bypasses validation on phone)
 - All use `[WCMessageKey.type: String, WCMessageKey.payload: Data]` envelope
@@ -319,9 +321,9 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - Save triggers `scheduleEngine.onAppActive` + dismiss
 
 ### WatchRootView (watchOS)
-- Status section: session state icon/color/title/subtitle, explicit Smart Wake arming truth (including the recovered post-wake backstop state), and health access button
+- Status section: session state icon/color/title/subtitle, explicit Smart Wake arming truth (including `HR active` when the proactive overnight workout is running and the recovered post-wake backstop state), and health access button
 - Smart Wake Schedules section: list from `WatchSessionManager.activeSchedules`
-- Diagnostics section: heuristic summary, verbose-diagnostics toggle, auto-launch status/truth-telling, next scheduled wake window, baseline readiness/BPM/sample count, phone handoff status, deferred watch fallback status, phone reachability, error messages, stop button
+- Diagnostics section: heuristic summary, verbose-diagnostics toggle, auto-launch status/truth-telling, workout-session ownership state (`overnight` vs `monitoring` vs idle), next scheduled wake window, baseline readiness/BPM/sample count, phone handoff status, deferred watch fallback status, phone reachability, error messages, stop button
 - Ambient mode: when `isLuminanceReduced` and the session is `.monitoring` or `.triggered`, the full list is replaced with a minimal "Smart Wake Active" view
 - Logs section: runtime-log metadata, session-log export shortcuts, watch-side log viewer navigation, and iPhone transfer actions
 
@@ -429,3 +431,21 @@ xcodebuild -target 'Lights Timer Watch App' -sdk watchsimulator26.2 build CODE_S
 - Watch monitoring still uses `HKWorkoutSession` during the bounded wake-session window, so Smart Wake consumes more battery near wake time than an idle watch app.
 - Smart Wake can only be newly armed while the watch app is active and the next computed session start is within watchOS' scheduling horizon. Normal watchOS process evictions are recoverable through the persisted pending wake + `handle(_:)` recovery path, but user force-quit and device reboot are still outside scope.
 - SwiftData model changes (adding/removing fields) may require migration handling for existing user data.
+
+## Development Tools And Practices
+
+### LSP (Language Server Protocol)
+**Always use LSP for code navigation instead of grep/glob when searching for symbols.** LSP provides accurate cross-file symbol resolution and is the primary tool for:
+- Finding where symbols are defined (`goToDefinition`)
+- Finding all usages of a symbol (`findReferences`)
+- Getting type information and documentation (`hover`)
+- Listing all symbols in a file (`documentSymbol`)
+- Searching for symbols across the workspace (`workspaceSymbol`)
+- Understanding call chains (`incomingCalls`, `outgoingCalls`)
+
+**If LSP is starting up** (e.g., showing "server is starting"), **wait for it to complete initialization** before attempting to search. Do NOT fall back to grep/glob during startup — let the LSP server finish indexing. Once active, LSP provides much more accurate results than text-based searches and understands the Swift type system.
+
+**Preference order:**
+1. LSP operations (accurate, type-aware)
+2. Glob for file patterns (fast, simple)
+3. Grep for content patterns (last resort, text-based)
