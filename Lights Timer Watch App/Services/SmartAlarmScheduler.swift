@@ -328,10 +328,7 @@ final class SmartAlarmScheduler: NSObject {
                     from: record,
                     reason: "preserving pending wake before initial WCSession hydration"
                 )
-                armingState = .armed(
-                    wakeUpTime: record.wakeUpTime,
-                    monitoringStart: record.baselineStart
-                )
+                armingState = restoredArmingState(from: record)
                 alarmSessionError = nil
                 logStore.log(
                     "SCHEDULER",
@@ -471,10 +468,7 @@ final class SmartAlarmScheduler: NSObject {
                     from: record,
                     reason: "preserving equivalent pending wake while app is inactive"
                 )
-                armingState = .armed(
-                    wakeUpTime: wakeUpTime,
-                    monitoringStart: baselineStart
-                )
+                armingState = restoredArmingState(from: record)
                 alarmSessionError = nil
                 logStore.log(
                     "SCHEDULER",
@@ -487,9 +481,13 @@ final class SmartAlarmScheduler: NSObject {
                 comparedTo: nextWake,
                 reason: "Upcoming wake changed while the watch app was inactive"
             )
+            pendingSchedule = nextWake
+            currentSessionScheduleID = nextSchedule.id
+            currentSessionWakeTime = wakeUpTime
             armingState = .needsForegroundToArm(wakeUpTime: wakeUpTime)
             scheduledMonitoringDate = nil
             alarmSessionError = nil
+            savePendingWakeRecord(for: nextWake, isSessionScheduled: false)
             logStore.log(
                 "SCHEDULER",
                 "Cannot arm extended runtime session — watch scene is not active. Will arm on next foreground.",
@@ -902,7 +900,8 @@ final class SmartAlarmScheduler: NSObject {
             windowStart: record.windowStart,
             baselineStart: correctStart,
             scheduledSessionStart: record.scheduledSessionStart,
-            savedAt: record.savedAt
+            savedAt: record.savedAt,
+            isSessionScheduled: record.isSessionScheduled
         )
         pendingWakeStore.savePendingWakeRecord(migrated)
         logStore.log(
@@ -1042,7 +1041,7 @@ final class SmartAlarmScheduler: NSObject {
         pendingSchedule = wake
         currentSessionScheduleID = wake.schedule.id
         currentSessionWakeTime = wake.wakeUpTime
-        scheduledMonitoringDate = wake.scheduledSessionStart
+        scheduledMonitoringDate = record.isSessionScheduled ? wake.scheduledSessionStart : nil
         alarmSessionError = nil
 
         logStore.prepareSessionLogIfNeeded(
@@ -1067,7 +1066,23 @@ final class SmartAlarmScheduler: NSObject {
         )
     }
 
-    private func savePendingWakeRecord(for wake: PendingWake) {
+    private func restoredArmingState(
+        from record: SmartWakePendingWakeRecord
+    ) -> SmartWakeArmingState {
+        if record.isSessionScheduled {
+            return .armed(
+                wakeUpTime: record.wakeUpTime,
+                monitoringStart: record.baselineStart
+            )
+        }
+
+        return .needsForegroundToArm(wakeUpTime: record.wakeUpTime)
+    }
+
+    private func savePendingWakeRecord(
+        for wake: PendingWake,
+        isSessionScheduled: Bool = true
+    ) {
         pendingWakeStore.savePendingWakeRecord(
             SmartWakePendingWakeRecord(
                 schedule: wake.schedule,
@@ -1075,12 +1090,13 @@ final class SmartAlarmScheduler: NSObject {
                 windowStart: wake.windowStart,
                 baselineStart: wake.baselineStart,
                 scheduledSessionStart: wake.scheduledSessionStart,
-                savedAt: Date()
+                savedAt: Date(),
+                isSessionScheduled: isSessionScheduled
             )
         )
         logStore.log(
             "SCHEDULER",
-            "Persisted pending wake for '\(wake.schedule.name)' at \(formatTimestamp(wake.wakeUpTime))"
+            "Persisted pending wake for '\(wake.schedule.name)' at \(formatTimestamp(wake.wakeUpTime)) sessionScheduled=\(isSessionScheduled)"
         )
     }
 

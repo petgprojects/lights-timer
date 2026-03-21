@@ -19,8 +19,8 @@ Two additional residual issues were identified in the runtime log and are addres
 **Implementation status:** This plan is **not** a single go-ahead changeset. It contains:
 - **Resolved gate**: The Prerequisite spike was completed on 2026-03-20. The no-builder path is technically viable and is the selected Issue 1 implementation path. See the Prerequisite section for the exact outcome and accepted tradeoff.
 - **Implemented on the current branch (2026-03-20)**: Cross-Cutting foreground detection, Issue 1's proactive-workout path, Issue 2's query/filter/dedup cleanup, and Issue 3's one-shot timer cleanup are now in code and the watch target builds successfully.
-- **Blocked reliability work**: Issue 4b does not block all code changes, but it blocks treating the watch-local HomeKit fallback as production-reliable until the background-write investigation is complete.
-- **Remaining safe-to-implement work once the above is acknowledged**: Issue 4a re-arm persistence fixes.
+- **Implemented on the current branch (2026-03-20)**: Issue 4a re-arm persistence fixes are now in code.
+- **Blocked reliability work**: Issue 4b still blocks treating the watch-local HomeKit fallback as production-reliable until the background-write investigation is complete.
 
 ---
 

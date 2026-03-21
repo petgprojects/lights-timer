@@ -7,6 +7,47 @@ struct SmartWakePendingWakeRecord: Codable, Equatable {
     let baselineStart: Date
     let scheduledSessionStart: Date
     let savedAt: Date
+    let isSessionScheduled: Bool
+
+    init(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        windowStart: Date,
+        baselineStart: Date,
+        scheduledSessionStart: Date,
+        savedAt: Date,
+        isSessionScheduled: Bool = true
+    ) {
+        self.schedule = schedule
+        self.wakeUpTime = wakeUpTime
+        self.windowStart = windowStart
+        self.baselineStart = baselineStart
+        self.scheduledSessionStart = scheduledSessionStart
+        self.savedAt = savedAt
+        self.isSessionScheduled = isSessionScheduled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schedule
+        case wakeUpTime
+        case windowStart
+        case baselineStart
+        case scheduledSessionStart
+        case savedAt
+        case isSessionScheduled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schedule = try container.decode(WatchScheduleSnapshot.self, forKey: .schedule)
+        wakeUpTime = try container.decode(Date.self, forKey: .wakeUpTime)
+        windowStart = try container.decode(Date.self, forKey: .windowStart)
+        baselineStart = try container.decode(Date.self, forKey: .baselineStart)
+        scheduledSessionStart = try container.decode(Date.self, forKey: .scheduledSessionStart)
+        savedAt = try container.decode(Date.self, forKey: .savedAt)
+        isSessionScheduled =
+            try container.decodeIfPresent(Bool.self, forKey: .isSessionScheduled) ?? true
+    }
 }
 
 enum PersistedSmartWakeAutoLaunchState: String {
