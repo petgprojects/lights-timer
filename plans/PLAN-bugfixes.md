@@ -18,8 +18,9 @@ Two additional residual issues were identified in the runtime log and are addres
 
 **Implementation status:** This plan is **not** a single go-ahead changeset. It contains:
 - **Resolved gate**: The Prerequisite spike was completed on 2026-03-20. The no-builder path is technically viable and is the selected Issue 1 implementation path. See the Prerequisite section for the exact outcome and accepted tradeoff.
+- **Implemented on the current branch (2026-03-20)**: Cross-Cutting foreground detection, Issue 1's proactive-workout path, Issue 2's query/filter/dedup cleanup, and Issue 3's one-shot timer cleanup are now in code and the watch target builds successfully.
 - **Blocked reliability work**: Issue 4b does not block all code changes, but it blocks treating the watch-local HomeKit fallback as production-reliable until the background-write investigation is complete.
-- **Safe-to-implement work once the above is acknowledged**: Cross-Cutting foreground detection, Issue 2 query/filter/dedup cleanup, Issue 3 timer cleanup, and Issue 4a re-arm persistence fixes.
+- **Remaining safe-to-implement work once the above is acknowledged**: Issue 4a re-arm persistence fixes.
 
 ---
 
@@ -519,7 +520,9 @@ Note: `rescheduleAlarmSession()` is only reached from `extendedRuntimeSessionDid
 
 ---
 
-## Issue 2: Filter Future-Dated HR Samples + Deduplicate Seed/Live Overlap
+## Issue 2: Filter Future-Dated HR Samples + Deduplicate Seed/Live Overlap (IMPLEMENTED 2026-03-20)
+
+**Result:** The watch-side implementation is in the current branch. The anchored query is bounded to `wakeUpTime + 5m`, future-dated batches are filtered before reaching the heuristic engine, and seed/live overlap is deduplicated by `HKSample.uuid` on both ingestion paths. A sub-agent diff review using `.claude/code-reviewer.md` found no actionable issues; the remaining gap is automated regression coverage for mixed duplicate/future-dated HealthKit batches.
 
 ### Root Cause
 
@@ -581,7 +584,9 @@ Note: The heuristic engine (`WakeHeuristicEngine.swift`) does NOT change for ded
 
 ---
 
-## Issue 3: Eliminate Redundant Wake Checks
+## Issue 3: Eliminate Redundant Wake Checks (IMPLEMENTED 2026-03-20)
+
+**Result:** The periodic 10-second wake-check timer has been removed from `SmartWakeSessionController`. Monitoring now evaluates on new HR data plus three one-shot timers: exact wake time (force-fire backstop), wake-window start (re-evaluate pre-window confidence the instant the window opens), and seed timeout (preserve the 30-second baseline-freeze escape hatch when no seed/live data arrives). The watch target builds successfully with this change.
 
 ### Root Cause
 

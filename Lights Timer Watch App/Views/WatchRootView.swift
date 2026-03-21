@@ -193,6 +193,12 @@ struct WatchRootView: View {
                     .monospacedDigit()
             }
 
+            LabeledContent("Last HR") {
+                Text(sessionController.lastHRSampleStatus)
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
             LabeledContent("Phone Ack") {
                 Text(sessionController.didReceivePhoneHandoffAck ? sessionController.handoffAckStatus : "Waiting/none")
                     .font(.caption2)

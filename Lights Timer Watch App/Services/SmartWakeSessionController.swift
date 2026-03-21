@@ -34,6 +34,7 @@ final class SmartWakeSessionController: NSObject {
     private(set) var errorMessage: String?
     private(set) var isHealthKitAuthorized: Bool = false
     private(set) var hasConfirmedHRAccess: Bool = false
+    private(set) var lastHRSampleDate: Date?
     private(set) var isMonitoringActive = false
     private(set) var isMonitoringStartupInProgress = false
     private(set) var isWorkoutSessionRunning = false
@@ -66,7 +67,9 @@ final class SmartWakeSessionController: NSObject {
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
-    private var wakeCheckTimer: Timer?
+    private var exactWakeTimer: Timer?
+    private var seedTimeoutTimer: Timer?
+    private var windowStartTimer: Timer?
     private var historicalSeedTask: Task<Void, Never>?
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
@@ -89,6 +92,7 @@ final class SmartWakeSessionController: NSObject {
     private var heartbeatPendingSecondBeat = false
     private let hapticDuration: TimeInterval = 60
     private let historicalSeedLookback: TimeInterval = 7200
+    private let historicalSeedTimeout: TimeInterval = 30
     private let watchLightHandoffDelay: TimeInterval = 8
     private var seenSampleUUIDs = Set<UUID>()
 
@@ -137,6 +141,16 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
+    private func updateLastHRSampleDate(with candidate: Date?) {
+        guard let candidate else { return }
+
+        if let lastHRSampleDate {
+            self.lastHRSampleDate = max(lastHRSampleDate, candidate)
+        } else {
+            lastHRSampleDate = candidate
+        }
+    }
+
     private func formatTimestamp(_ date: Date?) -> String {
         guard let date else { return "--" }
         return Self.timestampFormatter.string(from: date)
@@ -161,6 +175,11 @@ final class SmartWakeSessionController: NSObject {
         }
 
         return "\(minutes)m \(remainder)s"
+    }
+
+    var lastHRSampleStatus: String {
+        guard let lastHRSampleDate else { return "--" }
+        return "\(formatElapsed(Date().timeIntervalSince(lastHRSampleDate))) ago"
     }
 
     private func describeFallbackMode(_ mode: WatchFallbackMode) -> String {
@@ -320,6 +339,7 @@ final class SmartWakeSessionController: NSObject {
         currentScheduleID = schedule.id
         self.wakeUpTime = wakeUpTime
         self.windowStartTime = windowStartTime
+        lastHRSampleDate = nil
         didLogWakeWindowStart = false
         heuristicEngine.configure(wakeWindowStart: windowStartTime)
         log(
@@ -545,14 +565,14 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func tearDownMonitoringSession() {
-        wakeCheckTimer?.invalidate()
-        wakeCheckTimer = nil
+        invalidateMonitoringTimers()
 
         historicalSeedTask?.cancel()
         historicalSeedTask = nil
 
         stopHeartRateQuery()
         seenSampleUUIDs.removeAll()
+        lastHRSampleDate = nil
         isMonitoringStartupInProgress = false
     }
 
@@ -782,7 +802,9 @@ final class SmartWakeSessionController: NSObject {
         isMonitoringStartupInProgress = false
         isDegradedMode = false
         startHeartRateQuery(from: Date(), until: wakeUpTime)
-        startWakeCheckTimer()
+        scheduleExactWakeTimer()
+        scheduleSeedTimeoutTimer()
+        scheduleWindowStartTimer()
         checkForWakeTrigger()
         startHistoricalSeed(
             from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
@@ -803,7 +825,9 @@ final class SmartWakeSessionController: NSObject {
         )
 
         startHeartRateQuery(from: Date(), until: wakeUpTime)
-        startWakeCheckTimer()
+        scheduleExactWakeTimer()
+        scheduleSeedTimeoutTimer()
+        scheduleWindowStartTimer()
 
         if let windowStartTime {
             startHistoricalSeed(
@@ -871,6 +895,14 @@ final class SmartWakeSessionController: NSObject {
             log("HEALTHKIT", "Historical seed returned no samples", level: .warning)
         }
         heuristicEngine.seedHeartRateSamples(mappedSamples, referenceDate: endDate)
+        if !heuristicEngine.awaitingHistoricalSeed {
+            let maxDate = Date().addingTimeInterval(120)
+            updateLastHRSampleDate(
+                with: mappedSamples.lazy.map(\.date).filter { $0 <= maxDate }.max()
+            )
+            seedTimeoutTimer?.invalidate()
+            seedTimeoutTimer = nil
+        }
         checkForWakeTrigger()
     }
 
@@ -954,6 +986,7 @@ final class SmartWakeSessionController: NSObject {
 
             let uniqueSamples = timelySamples.filter { self.seenSampleUUIDs.insert($0.uuid).inserted }
             guard !uniqueSamples.isEmpty else { return }
+            self.updateLastHRSampleDate(with: uniqueSamples.lazy.map(\.startDate).max())
 
             if !self.hasConfirmedHRAccess {
                 self.hasConfirmedHRAccess = true
@@ -987,12 +1020,70 @@ final class SmartWakeSessionController: NSObject {
 
     // MARK: - Wake Check
 
-    private func startWakeCheckTimer() {
-        log("SESSION", "Starting wake-check timer with 10 second cadence")
-        wakeCheckTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+    private func invalidateMonitoringTimers() {
+        exactWakeTimer?.invalidate()
+        exactWakeTimer = nil
+        seedTimeoutTimer?.invalidate()
+        seedTimeoutTimer = nil
+        windowStartTimer?.invalidate()
+        windowStartTimer = nil
+    }
+
+    private func scheduleOneShotTimer(
+        _ keyPath: ReferenceWritableKeyPath<SmartWakeSessionController, Timer?>,
+        fireDate: Date,
+        logLabel: String,
+        action: @escaping (SmartWakeSessionController) -> Void
+    ) {
+        self[keyPath: keyPath]?.invalidate()
+
+        let interval = max(0, fireDate.timeIntervalSinceNow)
+        log(
+            "SESSION",
+            "Scheduling \(logLabel) timer for \(formatTimestamp(fireDate)) (in \(formatInterval(interval)))"
+        )
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.checkForWakeTrigger()
+                guard let self else { return }
+                self[keyPath: keyPath] = nil
+                action(self)
             }
+        }
+        self[keyPath: keyPath] = timer
+    }
+
+    private func scheduleExactWakeTimer() {
+        guard let wakeUpTime else { return }
+        scheduleOneShotTimer(
+            \.exactWakeTimer,
+            fireDate: wakeUpTime,
+            logLabel: "exact-wake"
+        ) { controller in
+            controller.checkForWakeTrigger()
+        }
+    }
+
+    private func scheduleSeedTimeoutTimer() {
+        let fireDate = Date().addingTimeInterval(historicalSeedTimeout)
+        scheduleOneShotTimer(
+            \.seedTimeoutTimer,
+            fireDate: fireDate,
+            logLabel: "seed-timeout"
+        ) { controller in
+            controller.checkForWakeTrigger()
+        }
+    }
+
+    private func scheduleWindowStartTimer() {
+        guard let windowStartTime else { return }
+        guard windowStartTime > Date() else { return }
+
+        scheduleOneShotTimer(
+            \.windowStartTimer,
+            fireDate: windowStartTime,
+            logLabel: "wake-window-start"
+        ) { controller in
+            controller.checkForWakeTrigger()
         }
     }
 
@@ -1832,7 +1923,8 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                         level: .warning
                     )
                     self.isDegradedMode = true
-                    // Keep monitoring alive — wake check timer and HR query may still work
+                    // Keep monitoring alive — sample-driven checks and the
+                    // exact-wake/window/seed timers remain active.
                 }
             }
         }
