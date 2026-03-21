@@ -1,50 +1,114 @@
 import SwiftUI
 
 struct WatchLogArchiveView: View {
+    @Binding var path: [WatchRootDestination]
     @Environment(SmartWakeLogStore.self) private var logStore
+    @Environment(WatchSessionManager.self) private var sessionManager
 
     var body: some View {
         List {
-            if let runtimeLog = logStore.runtimeLogFile {
-                Section("Runtime Log") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(runtimeLog.displayName)
-                            .font(.caption)
-                        Text("\(formatDate(runtimeLog.modifiedAt)) • \(runtimeLog.sizeDescription)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    NavigationLink("Open Runtime Log") {
-                        WatchLogDetailView(logFile: runtimeLog)
-                    }
-                }
+            runtimeLogSection
+            latestSessionSection
+            archiveSection
+            transferSection
+        }
+        .navigationTitle("Watch Logs")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                WatchTopMenu(path: $path, current: .logs)
             }
+        }
+        .onAppear {
+            logStore.refreshAvailableLogsIfNeeded()
+        }
+    }
 
-            Section("Saved Session Logs") {
-                if logStore.availableLogs.isEmpty {
-                    Text("No watch logs yet")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                } else {
-                    ForEach(logStore.availableLogs) { logFile in
-                        NavigationLink {
-                            WatchLogDetailView(logFile: logFile)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(logFile.displayName)
-                                    .font(.caption)
-                                Text("\(formatDate(logFile.modifiedAt)) • \(logFile.sizeDescription)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
+    private var runtimeLogSection: some View {
+        Section("Runtime Log") {
+            if let runtimeLog = logStore.runtimeLogFile {
+                logSummary(runtimeLog)
+
+                NavigationLink("Open Runtime Log") {
+                    WatchLogDetailView(logFile: runtimeLog)
+                }
+
+                ShareLink(item: runtimeLog, preview: SharePreview(runtimeLog.fileName)) {
+                    Label("Share Runtime Log", systemImage: "square.and.arrow.up")
+                }
+
+                Button {
+                    sessionManager.transferLogFile(runtimeLog.url)
+                } label: {
+                    Label("Send Runtime Log To iPhone", systemImage: "iphone")
+                }
+            } else {
+                Text("No watch logs yet")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        }
+    }
+
+    private var latestSessionSection: some View {
+        Section("Latest Session Log") {
+            if let latestSessionLog = logStore.latestSessionLog {
+                logSummary(latestSessionLog)
+
+                NavigationLink("Open Latest Session Log") {
+                    WatchLogDetailView(logFile: latestSessionLog)
+                }
+
+                ShareLink(item: latestSessionLog, preview: SharePreview(latestSessionLog.fileName)) {
+                    Label("Share Latest Session Log", systemImage: "doc.text")
+                }
+
+                Button {
+                    sessionManager.transferLogFile(latestSessionLog.url)
+                } label: {
+                    Label("Send Session Log To iPhone", systemImage: "iphone.gen3")
+                }
+            } else {
+                Text("No session logs yet")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        }
+    }
+
+    private var archiveSection: some View {
+        Section("Saved Session Logs") {
+            if logStore.availableLogs.isEmpty {
+                Text("No watch logs yet")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            } else {
+                ForEach(logStore.availableLogs) { logFile in
+                    NavigationLink {
+                        WatchLogDetailView(logFile: logFile)
+                    } label: {
+                        logSummary(logFile)
                     }
                 }
             }
         }
-        .navigationTitle("Watch Logs")
-        .onAppear {
-            logStore.refreshAvailableLogsIfNeeded()
+    }
+
+    private var transferSection: some View {
+        Section("Transfer Status") {
+            LabeledContent("iPhone Export") {
+                Text(logStore.lastTransferStatus)
+                    .font(.caption2)
+            }
+        }
+    }
+
+    private func logSummary(_ logFile: SmartWakeLogFile) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(logFile.displayName)
+                .font(.caption)
+            Text("\(formatDate(logFile.modifiedAt)) • \(logFile.sizeDescription)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -3,35 +3,105 @@ import SwiftUI
 import WatchKit
 #endif
 
+enum WatchRootDestination: Hashable {
+    case diagnostics
+    case logs
+}
+
+struct WatchTopMenu: View {
+    @Binding var path: [WatchRootDestination]
+    let current: WatchRootDestination?
+    @State private var isShowingMenu = false
+
+    var body: some View {
+        Button {
+            isShowingMenu = true
+        } label: {
+            Image(systemName: "line.3.horizontal")
+        }
+        .accessibilityLabel("Open Navigation Menu")
+        .confirmationDialog("Navigate", isPresented: $isShowingMenu, titleVisibility: .hidden) {
+            if current != nil {
+                Button("Main Screen") {
+                    path = []
+                }
+            }
+
+            if current != .diagnostics {
+                Button("Diagnostics") {
+                    path = [.diagnostics]
+                }
+            }
+
+            if current != .logs {
+                Button("Logs") {
+                    path = [.logs]
+                }
+            }
+
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+}
+
 struct WatchRootView: View {
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
-    @Environment(SmartWakeLogStore.self) private var logStore
     @Environment(WatchSessionManager.self) private var sessionManager
     @Environment(SmartWakeSessionController.self) private var sessionController
     #if os(watchOS)
+    @Environment(SmartWakeLogStore.self) private var logStore
     @Environment(SmartAlarmScheduler.self) private var alarmScheduler
     #endif
+    @State private var navigationPath: [WatchRootDestination] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Group {
-                if isLuminanceReduced && isAmbientSleepModeActive {
+                if showsAmbientMonitoringView {
                     ambientMonitoringView
                 } else {
-                    fullView
+                    mainView
                 }
             }
             .navigationTitle("Lights Timer")
+            .toolbar {
+                if !showsAmbientMonitoringView {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        WatchTopMenu(path: $navigationPath, current: nil)
+                    }
+                }
+            }
+            .navigationDestination(for: WatchRootDestination.self) { destination in
+                switch destination {
+                case .diagnostics:
+                    diagnosticsView
+                case .logs:
+                    WatchLogArchiveView(path: $navigationPath)
+                }
+            }
         }
     }
 
-    private var fullView: some View {
+    private var mainView: some View {
         @Bindable var sm = sessionManager
         return List {
             statusSection
             schedulesSection(schedules: $sm.activeSchedules)
-            diagnosticsSection
-            logsSection
+        }
+    }
+
+    private var diagnosticsView: some View {
+        List {
+            diagnosticsOverviewSection
+            #if DEBUG
+            spikeDiagnosticsSection
+            #endif
+        }
+        .navigationTitle("Diagnostics")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                WatchTopMenu(path: $navigationPath, current: .diagnostics)
+            }
         }
     }
 
@@ -143,7 +213,7 @@ struct WatchRootView: View {
         )
     }
 
-    private var diagnosticsSection: some View {
+    private var diagnosticsOverviewSection: some View {
         Section("Diagnostics") {
             if sessionController.sessionState == .monitoring {
                 Text(sessionController.heuristicEngine.diagnosticSummary)
@@ -240,7 +310,23 @@ struct WatchRootView: View {
                     .foregroundStyle(sessionController.isAlarmSessionActive ? .green : .secondary)
             }
 
-            #if DEBUG
+            if let error = sessionController.errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+
+            if sessionController.sessionState == .monitoring {
+                Button("Stop Monitoring", role: .destructive) {
+                    sessionController.stopMonitoring()
+                }
+            }
+        }
+    }
+
+    #if DEBUG
+    private var spikeDiagnosticsSection: some View {
+        Section("Spike Validation") {
             LabeledContent("No-Builder Spike") {
                 Text(sessionController.noBuilderValidationStatus)
                     .font(.caption2)
@@ -285,73 +371,9 @@ struct WatchRootView: View {
             Text("Debug-only spike: starts an HKWorkoutSession without a builder, keeps the anchored heart-rate query running, and logs sample cadence.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            #endif
-
-            if let error = sessionController.errorMessage {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-            }
-
-            if sessionController.sessionState == .monitoring {
-                Button("Stop Monitoring", role: .destructive) {
-                    sessionController.stopMonitoring()
-                }
-            }
         }
     }
-
-    private var logsSection: some View {
-        Section("Logs") {
-            NavigationLink("Open Watch Logs") {
-                WatchLogArchiveView()
-            }
-
-            if let runtimeLog = logStore.runtimeLogFile {
-                ShareLink(item: runtimeLog, preview: SharePreview(runtimeLog.fileName)) {
-                    Label("Share Runtime Log", systemImage: "square.and.arrow.up")
-                }
-
-                Button {
-                    sessionManager.transferLogFile(runtimeLog.url)
-                } label: {
-                    Label("Send Runtime Log To iPhone", systemImage: "iphone")
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(runtimeLog.displayName)
-                        .font(.caption2)
-                    Text("\(formatLogDate(runtimeLog.modifiedAt)) • \(runtimeLog.sizeDescription)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Text("No watch logs yet")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let latestSessionLog = logStore.latestSessionLog {
-                ShareLink(item: latestSessionLog, preview: SharePreview(latestSessionLog.fileName)) {
-                    Label("Share Latest Session Log", systemImage: "doc.text")
-                }
-
-                Button {
-                    sessionManager.transferLogFile(latestSessionLog.url)
-                } label: {
-                    Label("Send Session Log To iPhone", systemImage: "iphone.gen3")
-                }
-            }
-
-            LabeledContent("iPhone Export") {
-                Text(logStore.lastTransferStatus)
-                    .font(.caption2)
-            }
-        }
-        .onAppear {
-            logStore.refreshAvailableLogsIfNeeded()
-        }
-    }
+    #endif
 
     // MARK: - Actions
 
@@ -533,6 +555,10 @@ struct WatchRootView: View {
             || sessionController.sessionState == .triggered
     }
 
+    private var showsAmbientMonitoringView: Bool {
+        isLuminanceReduced && isAmbientSleepModeActive
+    }
+
     private var ambientMonitoringView: some View {
         VStack(spacing: 8) {
             Image(systemName: "moon.zzz.fill")
@@ -550,10 +576,6 @@ struct WatchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func formatLogDate(_ date: Date) -> String {
-        Self.logDateFormatter.string(from: date)
-    }
-
     private func formatTime(_ date: Date) -> String {
         Self.timeFormatter.string(from: date)
     }
@@ -561,13 +583,6 @@ struct WatchRootView: View {
     private func formatDateTime(_ date: Date) -> String {
         Self.dateTimeFormatter.string(from: date)
     }
-
-    private static let logDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-        return formatter
-    }()
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()

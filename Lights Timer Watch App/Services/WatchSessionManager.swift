@@ -48,7 +48,16 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 WCMessageKey.payload: data
             ]
             if session.isReachable {
-                session.sendMessage(message, replyHandler: nil, errorHandler: nil)
+                session.sendMessage(message, replyHandler: nil) { [weak self] error in
+                    self?.logStore.log(
+                        "CONNECTIVITY",
+                        "sendMessage failed for session state, falling back to transferUserInfo: \(error.localizedDescription)",
+                        level: .warning
+                    )
+                    session.transferUserInfo(message)
+                }
+            } else {
+                session.transferUserInfo(message)
             }
         } catch {
             logStore.log(
