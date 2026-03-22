@@ -221,7 +221,9 @@ struct WatchRootView: View {
                     .monospacedDigit()
             }
 
+            #if os(watchOS)
             Toggle("Verbose Diagnostics", isOn: runtimeDiagnosticsBinding)
+            #endif
 
             Text("Includes detailed heart-rate and heuristic logs. Increases file I/O and battery use.")
                 .font(.caption2)
@@ -485,12 +487,14 @@ struct WatchRootView: View {
         return "Workout Session"
     }
 
+    #if os(watchOS)
     private var runtimeDiagnosticsBinding: Binding<Bool> {
         Binding(
             get: { logStore.runtimeDiagnosticsEnabled },
             set: { logStore.runtimeDiagnosticsEnabled = $0 }
         )
     }
+    #endif
 
     private var autoLaunchStatusText: String {
         #if os(watchOS)
