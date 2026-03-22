@@ -257,7 +257,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
             if let status = try? decoder.decode(SmartWakePermissionStatus.self, from: payloadData) {
                 watchPermissionStatus = status
                 log(
-                    "Received watch permission status: healthKitAuthorized=\(status.healthKitAuthorized), watchConnected=\(status.watchConnected)"
+                    "Received watch permission status: heartRateDataActive=\(status.heartRateDataActive), watchConnected=\(status.watchConnected)"
                 )
             } else {
                 log("Failed to decode watch permission status payload", level: .error)

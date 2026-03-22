@@ -27,7 +27,7 @@ struct ContentView: View {
 
                 // Update health auth status from watch connectivity
                 if let status = watchConnectivity.watchPermissionStatus {
-                    healthKitAuth.updateFromWatch(authorized: status.healthKitAuthorized)
+                    healthKitAuth.updateFromWatch(heartRateActive: status.heartRateDataActive)
                 }
                 healthKitAuth.updateFromConnectivity(
                     watchPaired: watchConnectivity.isWatchPaired,

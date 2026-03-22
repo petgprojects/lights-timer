@@ -53,15 +53,23 @@ final class SmartWakeLogStore {
     private(set) var activeLogFile: SmartWakeLogFile?
     private(set) var runtimeLogFile: SmartWakeLogFile?
     private(set) var lastTransferStatus = "No log transfer yet"
+    var runtimeDiagnosticsEnabled = false {
+        didSet {
+            userDefaults.set(runtimeDiagnosticsEnabled, forKey: runtimeDiagnosticsKey)
+        }
+    }
 
     private let fileManager = FileManager.default
+    private let userDefaults = UserDefaults.standard
     private let logsDirectoryURL: URL
     private let transferSnapshotsDirectoryURL: URL
     private let transferSnapshotRetentionInterval: TimeInterval = 7 * 24 * 60 * 60
     private let retainedLogLimit = 14
     private let runtimeLogFileName = "smartwake-runtime.log"
+    private let runtimeDiagnosticsKey = "smartWakeRuntimeDiagnosticsEnabled"
 
     private var activeSessionKey: String?
+    private var logsDirty = false
 
     private let logTimestampFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -88,6 +96,7 @@ final class SmartWakeLogStore {
             "SmartWakeLogTransferSnapshots",
             isDirectory: true
         )
+        runtimeDiagnosticsEnabled = userDefaults.bool(forKey: runtimeDiagnosticsKey)
 
         ensureLogsDirectory()
         ensureTransferSnapshotsDirectory()
@@ -139,8 +148,27 @@ final class SmartWakeLogStore {
             level: .info,
             logURL: logURL
         )
+        logsDirty = true
         refreshAvailableLogs(selecting: logURL)
         pruneLogsIfNeeded(excluding: logURL)
+    }
+
+    @discardableResult
+    func prepareSessionLogIfNeeded(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        wakeWindowStart: Date,
+        reason: String
+    ) -> Bool {
+        let sessionKey = makeSessionKey(scheduleID: schedule.id, wakeUpTime: wakeUpTime)
+        guard activeSessionKey != sessionKey else { return false }
+        prepareSessionLog(
+            schedule: schedule,
+            wakeUpTime: wakeUpTime,
+            wakeWindowStart: wakeWindowStart,
+            reason: reason
+        )
+        return true
     }
 
     func log(_ category: String, _ message: String, level: SmartWakeLogLevel = .info) {
@@ -153,7 +181,7 @@ final class SmartWakeLogStore {
         }
 
         print(line, terminator: "")
-        refreshAvailableLogs(selecting: activeLogFile?.url ?? runtimeURL)
+        logsDirty = true
     }
 
     func latestLogContents() -> String {
@@ -167,6 +195,11 @@ final class SmartWakeLogStore {
     }
 
     func refreshAvailableLogs() {
+        refreshAvailableLogs(selecting: activeLogFile?.url)
+    }
+
+    func refreshAvailableLogsIfNeeded() {
+        guard logsDirty else { return }
         refreshAvailableLogs(selecting: activeLogFile?.url)
     }
 
@@ -236,6 +269,8 @@ final class SmartWakeLogStore {
         } else {
             activeLogFile = availableLogs.first
         }
+
+        logsDirty = false
     }
 
     private func pruneLogsIfNeeded(excluding excludedURL: URL) {

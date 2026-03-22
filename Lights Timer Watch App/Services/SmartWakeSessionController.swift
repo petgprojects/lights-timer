@@ -33,14 +33,27 @@ final class SmartWakeSessionController: NSObject {
     private(set) var currentScheduleID: UUID?
     private(set) var errorMessage: String?
     private(set) var isHealthKitAuthorized: Bool = false
+    private(set) var hasConfirmedHRAccess: Bool = false
+    private(set) var lastHRSampleDate: Date?
     private(set) var isMonitoringActive = false
+    private(set) var isMonitoringStartupInProgress = false
     private(set) var isWorkoutSessionRunning = false
+    private(set) var isProactiveWorkoutRunning = false
     private(set) var isDegradedMode = false
 
     private(set) var nextScheduledWakeWindowDescription: String?
     private(set) var didReceivePhoneHandoffAck = false
     private(set) var handoffAckStatus = "No recent trigger"
     private(set) var deferredLocalRampStatus = "Idle"
+    #if DEBUG
+    private(set) var isNoBuilderValidationActive = false
+    private(set) var noBuilderValidationStatus = "Idle"
+    private(set) var noBuilderValidationSampleCount = 0
+    private(set) var noBuilderValidationLastSampleDescription = "No samples yet"
+    private(set) var noBuilderValidationSeedProbeStatus = "Not run"
+    private var noBuilderValidationStartedAt: Date?
+    private var noBuilderValidationLastSampleAt: Date?
+    #endif
 
     /// Set by SmartAlarmScheduler to indicate the extended runtime session is active.
     var isAlarmSessionActive: Bool = false
@@ -54,12 +67,14 @@ final class SmartWakeSessionController: NSObject {
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
-    private var wakeCheckTimer: Timer?
+    private var exactWakeTimer: Timer?
+    private var seedTimeoutTimer: Timer?
+    private var windowStartTimer: Timer?
     private var historicalSeedTask: Task<Void, Never>?
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
 
-    private var currentSchedule: WatchScheduleSnapshot?
+    private(set) var currentSchedule: WatchScheduleSnapshot?
     private var wakeUpTime: Date?
     private var windowStartTime: Date?
     private var activeTriggerID: UUID?
@@ -77,7 +92,9 @@ final class SmartWakeSessionController: NSObject {
     private var heartbeatPendingSecondBeat = false
     private let hapticDuration: TimeInterval = 60
     private let historicalSeedLookback: TimeInterval = 7200
+    private let historicalSeedTimeout: TimeInterval = 30
     private let watchLightHandoffDelay: TimeInterval = 8
+    private var seenSampleUUIDs = Set<UUID>()
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
@@ -85,6 +102,7 @@ final class SmartWakeSessionController: NSObject {
     /// Fires when monitoring ends without a trigger (manual stop or failure).
     /// The scheduler uses this to tear down its extended runtime session and clear stale state.
     var onMonitoringCancelled: (() -> Void)?
+    var onHRAccessConfirmed: (() -> Void)?
     var onLogReadyToTransfer: ((URL) -> Void)?
 
     init(logStore: SmartWakeLogStore) {
@@ -96,6 +114,9 @@ final class SmartWakeSessionController: NSObject {
 
         heuristicEngine.logHandler = { [weak self] level, message in
             self?.log("HEURISTIC", message, level: level)
+        }
+        heuristicEngine.verboseDiagnosticsProvider = { [weak self] in
+            self?.logStore.runtimeDiagnosticsEnabled ?? false
         }
         homeKitService.logHandler = { [weak self] level, message in
             self?.log("HOMEKIT", message, level: level)
@@ -110,12 +131,23 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func queueActiveLogTransfer() {
+        logStore.refreshAvailableLogsIfNeeded()
         if let runtimeLogURL = logStore.runtimeLogFile?.url {
             onLogReadyToTransfer?(runtimeLogURL)
         }
         if let logURL = logStore.activeLogFile?.url,
            logURL != logStore.runtimeLogFile?.url {
             onLogReadyToTransfer?(logURL)
+        }
+    }
+
+    private func updateLastHRSampleDate(with candidate: Date?) {
+        guard let candidate else { return }
+
+        if let lastHRSampleDate {
+            self.lastHRSampleDate = max(lastHRSampleDate, candidate)
+        } else {
+            lastHRSampleDate = candidate
         }
     }
 
@@ -127,6 +159,27 @@ final class SmartWakeSessionController: NSObject {
     private func formatBPM(_ value: Double?) -> String {
         guard let value else { return "--" }
         return String(format: "%.1f", value)
+    }
+
+    private func formatInterval(_ interval: TimeInterval) -> String {
+        String(format: "%.1fs", interval)
+    }
+
+    private func formatElapsed(_ interval: TimeInterval) -> String {
+        let seconds = max(0, Int(interval.rounded()))
+        let minutes = seconds / 60
+        let remainder = seconds % 60
+
+        if minutes == 0 {
+            return "\(remainder)s"
+        }
+
+        return "\(minutes)m \(remainder)s"
+    }
+
+    var lastHRSampleStatus: String {
+        guard let lastHRSampleDate else { return "--" }
+        return "\(formatElapsed(Date().timeIntervalSince(lastHRSampleDate))) ago"
     }
 
     private func describeFallbackMode(_ mode: WatchFallbackMode) -> String {
@@ -179,15 +232,17 @@ final class SmartWakeSessionController: NSObject {
         do {
             try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
             let status = healthStore.authorizationStatus(for: heartRate)
-            isHealthKitAuthorized = status == .sharingAuthorized || status != .notDetermined
+            isHealthKitAuthorized = status != .notDetermined
+            hasConfirmedHRAccess = await probeHeartRateReadAccess()
             log(
                 "HEALTHKIT",
-                "Authorization request completed. heartRateStatus=\(status.rawValue) authorized=\(isHealthKitAuthorized)"
+                "Authorization complete. promptCompleted=\(isHealthKitAuthorized) hrDataAccessible=\(hasConfirmedHRAccess)"
             )
             return isHealthKitAuthorized
         } catch {
             errorMessage = error.localizedDescription
             isHealthKitAuthorized = false
+            hasConfirmedHRAccess = false
             log(
                 "HEALTHKIT",
                 "Authorization request failed: \(error.localizedDescription)",
@@ -195,6 +250,42 @@ final class SmartWakeSessionController: NSObject {
             )
             return false
         }
+    }
+
+    private func probeHeartRateReadAccess() async -> Bool {
+        let endDate = Date()
+        let startDate = endDate.addingTimeInterval(-86400)
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+
+        let found = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: HKQuantityType(.heartRate),
+                predicate: predicate,
+                limit: 1,
+                sortDescriptors: [sort]
+            ) { _, samples, error in
+                if let error {
+                    Task { @MainActor [weak self] in
+                        self?.log(
+                            "HEALTHKIT",
+                            "HealthKit heart-rate probe failed: \(error.localizedDescription)",
+                            level: .warning
+                        )
+                    }
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                let found = ((samples as? [HKQuantitySample])?.isEmpty == false)
+                continuation.resume(returning: found)
+            }
+
+            healthStore.execute(query)
+        }
+
+        log("HEALTHKIT", "HealthKit heart-rate probe: found=\(found)")
+        return found
     }
 
     // MARK: - Scheduling Diagnostics
@@ -223,7 +314,18 @@ final class SmartWakeSessionController: NSObject {
         schedule: WatchScheduleSnapshot,
         wakeUpTime: Date
     ) async {
-        guard !isMonitoringActive else {
+        #if DEBUG
+        guard !isNoBuilderValidationActive else {
+            log(
+                "SESSION",
+                "Ignoring startMonitoring for '\(schedule.name)' while no-builder validation is active",
+                level: .warning
+            )
+            return
+        }
+        #endif
+
+        guard !isMonitoringActive, !isMonitoringStartupInProgress else {
             log("SESSION", "Ignoring duplicate startMonitoring for '\(schedule.name)'")
             return
         }
@@ -237,6 +339,7 @@ final class SmartWakeSessionController: NSObject {
         currentScheduleID = schedule.id
         self.wakeUpTime = wakeUpTime
         self.windowStartTime = windowStartTime
+        lastHRSampleDate = nil
         didLogWakeWindowStart = false
         heuristicEngine.configure(wakeWindowStart: windowStartTime)
         log(
@@ -244,43 +347,91 @@ final class SmartWakeSessionController: NSObject {
             "Starting monitoring for '\(schedule.name)' wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStartTime)) haptic=\(hapticPatternType.displayName)"
         )
 
-        isMonitoringActive = true
+        isMonitoringStartupInProgress = true
         isDegradedMode = false
         sessionState = .monitoring
         notifyStateChange()
 
-        if workoutSession != nil {
-            // Proactive workout session is already running — skip starting a new one
-            isWorkoutSessionRunning = true
-            log("SESSION", "Reusing proactive workout session for monitoring")
-            startHeartRateQuery(from: Date())
-            startWakeCheckTimer()
-            checkForWakeTrigger()
-            startHistoricalSeed(
-                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
-                to: Date()
+        if !isProactiveWorkoutRunning, workoutSession != nil {
+            clearWorkoutSessionReference(
+                reason: "Cleaning up stale non-proactive workout state before monitoring start",
+                level: .warning
             )
-            log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-        } else {
-            do {
+        }
+
+        do {
+            if isProactiveWorkoutRunning {
+                if isWorkoutSessionUsable() {
+                    log("SESSION", "Reusing proactive workout session for monitoring")
+                    isProactiveWorkoutRunning = false
+                    beginMonitoringDataFlow(
+                        wakeUpTime: wakeUpTime,
+                        windowStartTime: windowStartTime
+                    )
+                } else {
+                    log(
+                        "SESSION",
+                        "Proactive workout session is no longer usable; falling back to monitoring-time workout start",
+                        level: .warning
+                    )
+                    stopProactiveWorkout()
+                    try await startWorkoutSession()
+
+                    if isDegradedMode {
+                        log(
+                            "SESSION",
+                            "Workout session ended during monitoring startup — entering degraded mode",
+                            level: .warning
+                        )
+                        clearWorkoutSessionReference(
+                            reason: "Clearing failed monitoring-startup workout state",
+                            level: .warning
+                        )
+                        startDegradedMonitoring()
+                        return
+                    }
+
+                    beginMonitoringDataFlow(
+                        wakeUpTime: wakeUpTime,
+                        windowStartTime: windowStartTime
+                    )
+                }
+            } else {
                 try await startWorkoutSession()
-                isWorkoutSessionRunning = true
-                startHeartRateQuery(from: Date())
-                startWakeCheckTimer()
-                checkForWakeTrigger()
-                startHistoricalSeed(
-                    from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
-                    to: Date()
+
+                if isDegradedMode {
+                    log(
+                        "SESSION",
+                        "Workout session ended during monitoring startup — entering degraded mode",
+                        level: .warning
+                    )
+                    clearWorkoutSessionReference(
+                        reason: "Clearing failed monitoring-startup workout state",
+                        level: .warning
+                    )
+                    startDegradedMonitoring()
+                    return
+                }
+
+                beginMonitoringDataFlow(
+                    wakeUpTime: wakeUpTime,
+                    windowStartTime: windowStartTime
                 )
-                log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-            } catch {
-                log(
-                    "SESSION",
-                    "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
-                    level: .warning
-                )
-                startDegradedMonitoring()
             }
+
+            log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
+        } catch {
+            isMonitoringStartupInProgress = false
+            clearWorkoutSessionReference(
+                reason: "Clearing workout session after monitoring-startup failure",
+                level: .warning
+            )
+            log(
+                "SESSION",
+                "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
+                level: .warning
+            )
+            startDegradedMonitoring()
         }
     }
 
@@ -414,16 +565,15 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func tearDownMonitoringSession() {
-        wakeCheckTimer?.invalidate()
-        wakeCheckTimer = nil
+        invalidateMonitoringTimers()
 
         historicalSeedTask?.cancel()
         historicalSeedTask = nil
 
-        if let query = heartRateQuery {
-            healthStore.stop(query)
-            heartRateQuery = nil
-        }
+        stopHeartRateQuery()
+        seenSampleUUIDs.removeAll()
+        lastHRSampleDate = nil
+        isMonitoringStartupInProgress = false
     }
 
     // MARK: - Handoff
@@ -507,6 +657,8 @@ final class SmartWakeSessionController: NSObject {
 
         session.startActivity(with: Date())
         try await builder.beginCollection(at: Date())
+        isProactiveWorkoutRunning = false
+        isWorkoutSessionRunning = true
         log("HEALTHKIT", "Workout session started and live collection began")
     }
 
@@ -518,35 +670,153 @@ final class SmartWakeSessionController: NSObject {
         }
         workoutSession = nil
         workoutBuilder = nil
+        isProactiveWorkoutRunning = false
         isWorkoutSessionRunning = false
         log("HEALTHKIT", "Workout session ended")
     }
 
-    // MARK: - Proactive Workout Session
+    private func clearWorkoutSessionReference(
+        reason: String,
+        level: SmartWakeLogLevel = .warning
+    ) {
+        if workoutSession != nil || workoutBuilder != nil {
+            log("HEALTHKIT", reason, level: level)
+        }
+        workoutSession?.end()
+        workoutSession = nil
+        workoutBuilder = nil
+        isProactiveWorkoutRunning = false
+        isWorkoutSessionRunning = false
+    }
 
-    func startProactiveWorkoutSession() async throws {
-        guard workoutSession == nil else {
-            log("HEALTHKIT", "Proactive workout start skipped — workout session already exists")
+    func preStartWorkoutSession() {
+        #if DEBUG
+        guard !isNoBuilderValidationActive else {
+            log(
+                "HEALTHKIT",
+                "Skipping proactive workout start while no-builder validation is active",
+                level: .warning
+            )
+            return
+        }
+        #endif
+
+        guard !isMonitoringActive, !isMonitoringStartupInProgress else {
+            log(
+                "HEALTHKIT",
+                "Skipping proactive workout start because monitoring is already in progress",
+                level: .warning
+            )
             return
         }
 
-        log("HEALTHKIT", "Starting proactive workout session for background keep-alive")
-        try await startWorkoutSession()
-        isWorkoutSessionRunning = true
-        log("HEALTHKIT", "Proactive workout session started successfully")
+        guard !isProactiveWorkoutRunning, !isWorkoutSessionRunning else {
+            log("HEALTHKIT", "Proactive workout already running — skipping")
+            return
+        }
+
+        guard isHealthKitAuthorized else {
+            log(
+                "HEALTHKIT",
+                "HealthKit prompt not completed — skipping proactive workout start",
+                level: .warning
+            )
+            return
+        }
+
+        if workoutSession != nil {
+            log("HEALTHKIT", "Cleaning up stale workout session reference before proactive start", level: .warning)
+            workoutSession?.end()
+            workoutSession = nil
+            if workoutBuilder != nil {
+                log(
+                    "HEALTHKIT",
+                    "Unexpected non-nil workoutBuilder during proactive cleanup — nilling without teardown",
+                    level: .error
+                )
+            }
+            workoutBuilder = nil
+            isWorkoutSessionRunning = false
+        }
+
+        let config = HKWorkoutConfiguration()
+        config.activityType = .other
+        config.locationType = .unknown
+
+        do {
+            let session = try HKWorkoutSession(healthStore: healthStore, configuration: config)
+            session.delegate = self
+            workoutSession = session
+            workoutBuilder = nil
+
+            let startDate = Date()
+            session.startActivity(with: startDate)
+            isProactiveWorkoutRunning = true
+            isWorkoutSessionRunning = true
+            log(
+                "HEALTHKIT",
+                "Proactive no-builder workout session started at \(formatTimestamp(startDate))"
+            )
+        } catch {
+            workoutSession = nil
+            workoutBuilder = nil
+            isProactiveWorkoutRunning = false
+            isWorkoutSessionRunning = false
+            log(
+                "HEALTHKIT",
+                "Failed to start proactive no-builder workout session: \(error.localizedDescription)",
+                level: .error
+            )
+        }
     }
 
-    func endProactiveWorkoutSession() {
-        guard workoutSession != nil, !isMonitoringActive else { return }
-        log("HEALTHKIT", "Ending proactive workout session")
-        Task { [weak self] in
-            await self?.endWorkoutSession()
+    func stopProactiveWorkout() {
+        guard isProactiveWorkoutRunning || workoutSession != nil else { return }
+
+        log("HEALTHKIT", "Stopping proactive workout session")
+        stopHeartRateQuery()
+        workoutSession?.end()
+        workoutSession = nil
+        if workoutBuilder != nil {
+            log(
+                "HEALTHKIT",
+                "Unexpected non-nil workoutBuilder while stopping proactive workout — clearing without teardown",
+                level: .error
+            )
         }
+        workoutBuilder = nil
+        isProactiveWorkoutRunning = false
+        isWorkoutSessionRunning = false
+        seenSampleUUIDs.removeAll()
+    }
+
+    private func isWorkoutSessionUsable() -> Bool {
+        workoutSession != nil && isWorkoutSessionRunning
+    }
+
+    private func beginMonitoringDataFlow(
+        wakeUpTime: Date,
+        windowStartTime: Date
+    ) {
+        isMonitoringActive = true
+        isMonitoringStartupInProgress = false
+        isDegradedMode = false
+        startHeartRateQuery(from: Date(), until: wakeUpTime)
+        scheduleExactWakeTimer()
+        scheduleSeedTimeoutTimer()
+        scheduleWindowStartTimer()
+        checkForWakeTrigger()
+        startHistoricalSeed(
+            from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
+            to: Date()
+        )
     }
 
     // MARK: - Degraded Monitoring
 
     private func startDegradedMonitoring() {
+        isMonitoringActive = true
+        isMonitoringStartupInProgress = false
         isDegradedMode = true
         log(
             "SESSION",
@@ -554,12 +824,14 @@ final class SmartWakeSessionController: NSObject {
             level: .warning
         )
 
-        startHeartRateQuery(from: Date())
-        startWakeCheckTimer()
+        startHeartRateQuery(from: Date(), until: wakeUpTime)
+        scheduleExactWakeTimer()
+        scheduleSeedTimeoutTimer()
+        scheduleWindowStartTimer()
 
-        if let wakeUpTime {
+        if let windowStartTime {
             startHistoricalSeed(
-                from: wakeUpTime.addingTimeInterval(-historicalSeedLookback),
+                from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
                 to: Date()
             )
         }
@@ -602,10 +874,16 @@ final class SmartWakeSessionController: NSObject {
 
     private func seedHistoricalHeartRateSamples(from startDate: Date, to endDate: Date) async throws {
         let samples = try await fetchHistoricalHeartRateSamples(from: startDate, to: endDate)
-        guard isMonitoringActive else { return }
+        guard isMonitoringActive || isMonitoringStartupInProgress else { return }
+
+        let uniqueSamples = samples.filter { seenSampleUUIDs.insert($0.uuid).inserted }
+        guard !uniqueSamples.isEmpty else {
+            log("HEALTHKIT", "Historical seed contained only duplicate samples", level: .warning)
+            return
+        }
 
         let bpmUnit = HKUnit.count().unitDivided(by: .minute())
-        let mappedSamples = samples.map { sample in
+        let mappedSamples = uniqueSamples.map { sample in
             (date: sample.startDate, bpm: sample.quantity.doubleValue(for: bpmUnit))
         }
         if let firstSample = mappedSamples.first, let lastSample = mappedSamples.last {
@@ -617,6 +895,14 @@ final class SmartWakeSessionController: NSObject {
             log("HEALTHKIT", "Historical seed returned no samples", level: .warning)
         }
         heuristicEngine.seedHeartRateSamples(mappedSamples, referenceDate: endDate)
+        if !heuristicEngine.awaitingHistoricalSeed {
+            let maxDate = Date().addingTimeInterval(120)
+            updateLastHRSampleDate(
+                with: mappedSamples.lazy.map(\.date).filter { $0 <= maxDate }.max()
+            )
+            seedTimeoutTimer?.invalidate()
+            seedTimeoutTimer = nil
+        }
         checkForWakeTrigger()
     }
 
@@ -646,39 +932,78 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
-    private func startHeartRateQuery(from startDate: Date) {
+    private func startHeartRateQuery(from startDate: Date, until endDate: Date?) {
         let heartRateType = HKQuantityType(.heartRate)
-        log("HEALTHKIT", "Starting anchored heart-rate query from \(formatTimestamp(startDate)) (open-ended; future-dated samples filtered in heuristic engine)")
+        stopHeartRateQuery()
+        let queryEndDate = endDate.map { max(startDate.addingTimeInterval(300), $0.addingTimeInterval(300)) }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: queryEndDate)
+        log(
+            "HEALTHKIT",
+            "Starting anchored heart-rate query from \(formatTimestamp(startDate)) to \(formatTimestamp(queryEndDate))"
+        )
 
         let query = HKAnchoredObjectQuery(
             type: heartRateType,
-            predicate: HKQuery.predicateForSamples(withStart: startDate, end: nil),
+            predicate: predicate,
             anchor: nil,
             limit: HKObjectQueryNoLimit
         ) { [weak self] _, samples, _, _, _ in
-            self?.processHeartRateSamples(samples)
+            self?.processHeartRateSamples(samples, source: "initial-query")
         }
 
         query.updateHandler = { [weak self] _, samples, _, _, _ in
-            self?.processHeartRateSamples(samples)
+            self?.processHeartRateSamples(samples, source: "live")
         }
 
         healthStore.execute(query)
         heartRateQuery = query
     }
 
-    nonisolated private func processHeartRateSamples(_ samples: [HKSample]?) {
+    nonisolated private func processHeartRateSamples(_ samples: [HKSample]?, source: String) {
         guard let samples = samples as? [HKQuantitySample], !samples.isEmpty else { return }
 
         Task { @MainActor in
-            let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+            #if DEBUG
+            if self.isNoBuilderValidationActive {
+                let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+                self.processNoBuilderValidationSamples(samples, bpmUnit: bpmUnit)
+                return
+            }
+            #endif
 
-            for sample in samples {
-                let bpm = sample.quantity.doubleValue(for: bpmUnit)
+            guard self.isMonitoringActive || self.isMonitoringStartupInProgress else { return }
+
+            let maxDate = Date().addingTimeInterval(120)
+            let timelySamples = samples.filter { $0.startDate <= maxDate }
+            let filteredFutureCount = samples.count - timelySamples.count
+            if filteredFutureCount > 0 {
                 self.log(
                     "HEALTHKIT",
-                    "Live heart-rate sample \(self.formatBPM(bpm)) BPM at \(self.formatTimestamp(sample.startDate))"
+                    "Filtered \(filteredFutureCount) future-dated sample(s) from \(source) batch of \(samples.count)",
+                    level: .warning
                 )
+            }
+
+            let uniqueSamples = timelySamples.filter { self.seenSampleUUIDs.insert($0.uuid).inserted }
+            guard !uniqueSamples.isEmpty else { return }
+            self.updateLastHRSampleDate(with: uniqueSamples.lazy.map(\.startDate).max())
+
+            if !self.hasConfirmedHRAccess {
+                self.hasConfirmedHRAccess = true
+                self.log("HEALTHKIT", "HR access confirmed via live sample")
+                self.onHRAccessConfirmed?()
+            }
+
+            let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+
+            for sample in uniqueSamples {
+                let bpm = sample.quantity.doubleValue(for: bpmUnit)
+                if self.logStore.runtimeDiagnosticsEnabled {
+                    self.log(
+                        "HEALTHKIT",
+                        "Heart-rate sample (\(source)) \(self.formatBPM(bpm)) BPM at \(self.formatTimestamp(sample.startDate))"
+                    )
+                }
                 self.heuristicEngine.addHeartRateSample(bpm: bpm, date: sample.startDate)
             }
 
@@ -686,14 +1011,128 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
+    private func stopHeartRateQuery() {
+        if let query = heartRateQuery {
+            healthStore.stop(query)
+            heartRateQuery = nil
+        }
+    }
+
     // MARK: - Wake Check
 
-    private func startWakeCheckTimer() {
-        log("SESSION", "Starting wake-check timer with 10 second cadence")
-        wakeCheckTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+    private func invalidateMonitoringTimers() {
+        exactWakeTimer?.invalidate()
+        exactWakeTimer = nil
+        seedTimeoutTimer?.invalidate()
+        seedTimeoutTimer = nil
+        windowStartTimer?.invalidate()
+        windowStartTimer = nil
+    }
+
+    private func scheduleOneShotTimer(
+        _ keyPath: ReferenceWritableKeyPath<SmartWakeSessionController, Timer?>,
+        fireDate: Date,
+        logLabel: String,
+        action: @escaping (SmartWakeSessionController) -> Void
+    ) {
+        self[keyPath: keyPath]?.invalidate()
+
+        let interval = max(0, fireDate.timeIntervalSinceNow)
+        log(
+            "SESSION",
+            "Scheduling \(logLabel) timer for \(formatTimestamp(fireDate)) (in \(formatInterval(interval)))"
+        )
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.checkForWakeTrigger()
+                guard let self else { return }
+                self[keyPath: keyPath] = nil
+                action(self)
             }
+        }
+        self[keyPath: keyPath] = timer
+    }
+
+    private func scheduleExactWakeTimer() {
+        guard let wakeUpTime else { return }
+        scheduleOneShotTimer(
+            \.exactWakeTimer,
+            fireDate: wakeUpTime,
+            logLabel: "exact-wake"
+        ) { controller in
+            controller.checkForWakeTrigger()
+        }
+    }
+
+    private func scheduleSeedTimeoutTimer() {
+        let fireDate = Date().addingTimeInterval(historicalSeedTimeout)
+        scheduleOneShotTimer(
+            \.seedTimeoutTimer,
+            fireDate: fireDate,
+            logLabel: "seed-timeout"
+        ) { controller in
+            controller.checkForWakeTrigger()
+        }
+    }
+
+    private func scheduleWindowStartTimer() {
+        guard let windowStartTime else { return }
+        guard windowStartTime > Date() else { return }
+
+        scheduleOneShotTimer(
+            \.windowStartTimer,
+            fireDate: windowStartTime,
+            logLabel: "wake-window-start"
+        ) { controller in
+            controller.checkForWakeTrigger()
+        }
+    }
+
+    /// Called by the scheduler when the extended runtime session is about to
+    /// expire or has been invalidated. Runs an immediate wake check so the
+    /// watch can still force-fire before background execution is lost.
+    func forceImmediateWakeCheck() {
+        guard let wakeUpTime, let currentSchedule else { return }
+
+        let now = Date()
+        if now >= wakeUpTime, !heuristicEngine.hasTriggered {
+            log(
+                "WAKE_WINDOW",
+                "Emergency force-fire at \(formatTimestamp(now)) — session loss before monitoring fully committed",
+                level: .warning
+            )
+            fireTrigger(
+                schedule: currentSchedule,
+                confidence: 1.0,
+                fallbackMode: .exactWakeFinalState
+            )
+        } else if isMonitoringActive {
+            checkForWakeTrigger()
+        }
+    }
+
+    /// Clears monitoring state without marking the wake as completed, so a
+    /// later foreground pass can still re-arm the same occurrence if needed.
+    func tearDownMonitoringWithoutCompletion() {
+        log("SESSION", "Tearing down monitoring after session loss (occurrence not completed)")
+        tearDownMonitoringSession()
+        stopHaptics()
+        deferredLightRampTask?.cancel()
+        deferredLightRampTask = nil
+        lightRampTask?.cancel()
+        lightRampTask = nil
+        activeLocalRampTriggerID = nil
+        activeTriggerID = nil
+        activeTriggerSchedule = nil
+        activeTriggerDate = nil
+        activeTriggerWakeUpTime = nil
+        activeTriggerFallbackMode = nil
+        isMonitoringActive = false
+        isDegradedMode = false
+        sessionState = .idle
+        notifyStateChange()
+
+        Task { [weak self] in
+            await self?.endWorkoutSession()
         }
     }
 
@@ -821,6 +1260,189 @@ final class SmartWakeSessionController: NSObject {
             mode: .earlyRamp
         )
     }
+
+    #if DEBUG
+    func startNoBuilderValidation() async {
+        guard !isMonitoringActive, !isMonitoringStartupInProgress, !isProactiveWorkoutRunning else {
+            noBuilderValidationStatus = "Monitoring active. Stop monitoring first."
+            log(
+                "VALIDATION",
+                "Refusing to start no-builder validation while another workout path is active",
+                level: .warning
+            )
+            return
+        }
+
+        guard !isNoBuilderValidationActive else {
+            noBuilderValidationStatus = "Already running"
+            log("VALIDATION", "Ignoring duplicate no-builder validation start", level: .warning)
+            return
+        }
+
+        if !isHealthKitAuthorized {
+            let authorized = await requestAuthorization()
+            guard authorized else {
+                noBuilderValidationStatus = "Health access request failed"
+                log(
+                    "VALIDATION",
+                    "Cannot start no-builder validation because HealthKit authorization failed",
+                    level: .error
+                )
+                return
+            }
+        }
+
+        noBuilderValidationSampleCount = 0
+        noBuilderValidationLastSampleDescription = "No samples yet"
+        noBuilderValidationSeedProbeStatus = "Not run"
+        noBuilderValidationLastSampleAt = nil
+        noBuilderValidationStatus = "Starting..."
+
+        stopHeartRateQuery()
+        if workoutSession != nil {
+            await endWorkoutSession()
+        }
+
+        let config = HKWorkoutConfiguration()
+        config.activityType = .other
+        config.locationType = .unknown
+
+        do {
+            let session = try HKWorkoutSession(healthStore: healthStore, configuration: config)
+            session.delegate = self
+
+            workoutSession = session
+            workoutBuilder = nil
+            isWorkoutSessionRunning = true
+            isNoBuilderValidationActive = true
+
+            let startDate = Date()
+            noBuilderValidationStartedAt = startDate
+            noBuilderValidationStatus = "Active — waiting for samples"
+            log(
+                "VALIDATION",
+                "Started no-builder workout validation at \(formatTimestamp(startDate)). Send the app to background and watch for heart-rate samples."
+            )
+
+            session.startActivity(with: startDate)
+            startHeartRateQuery(from: startDate, until: nil)
+        } catch {
+            workoutSession = nil
+            workoutBuilder = nil
+            isWorkoutSessionRunning = false
+            isNoBuilderValidationActive = false
+            noBuilderValidationStartedAt = nil
+            noBuilderValidationStatus = "Start failed: \(error.localizedDescription)"
+            log(
+                "VALIDATION",
+                "Failed to start no-builder workout validation: \(error.localizedDescription)",
+                level: .error
+            )
+        }
+    }
+
+    func stopNoBuilderValidation() {
+        guard isNoBuilderValidationActive else {
+            noBuilderValidationStatus = "No active validation session"
+            log("VALIDATION", "Ignoring stop request with no active no-builder validation", level: .warning)
+            return
+        }
+
+        let startedAt = noBuilderValidationStartedAt
+        let sampleCount = noBuilderValidationSampleCount
+        isNoBuilderValidationActive = false
+        noBuilderValidationStatus = "Stopping..."
+        log("VALIDATION", "Stopping no-builder workout validation")
+        stopHeartRateQuery()
+
+        Task { [weak self] in
+            await self?.endWorkoutSession()
+            await MainActor.run {
+                guard let self else { return }
+                self.finishNoBuilderValidationStop(startedAt: startedAt, sampleCount: sampleCount)
+            }
+        }
+    }
+
+    func runNoBuilderValidationSeedProbe() async {
+        guard isNoBuilderValidationActive, let startedAt = noBuilderValidationStartedAt else {
+            noBuilderValidationSeedProbeStatus = "Start validation first"
+            log(
+                "VALIDATION",
+                "Ignoring 2h seed probe because no-builder validation is not active",
+                level: .warning
+            )
+            return
+        }
+
+        noBuilderValidationSeedProbeStatus = "Running..."
+        let endDate = Date()
+        let queryStart = endDate.addingTimeInterval(-historicalSeedLookback)
+        log(
+            "VALIDATION",
+            "Running 2h seed probe from \(formatTimestamp(queryStart)) to \(formatTimestamp(endDate))"
+        )
+
+        do {
+            let samples = try await fetchHistoricalHeartRateSamples(from: queryStart, to: endDate)
+            let freshSamples = samples.filter { $0.startDate >= startedAt }
+            let latestFreshSample = freshSamples.last?.startDate
+            let summary = freshSamples.isEmpty
+                ? "Fresh 0 / total \(samples.count)"
+                : "Fresh \(freshSamples.count) / total \(samples.count), latest \(formatTimestamp(latestFreshSample))"
+
+            noBuilderValidationSeedProbeStatus = summary
+            log(
+                "VALIDATION",
+                "2h seed probe complete. total=\(samples.count) freshSinceStart=\(freshSamples.count) latestFresh=\(formatTimestamp(latestFreshSample))"
+            )
+        } catch {
+            noBuilderValidationSeedProbeStatus = "Probe failed: \(error.localizedDescription)"
+            log(
+                "VALIDATION",
+                "2h seed probe failed: \(error.localizedDescription)",
+                level: .error
+            )
+        }
+    }
+
+    private func processNoBuilderValidationSamples(_ samples: [HKQuantitySample], bpmUnit: HKUnit) {
+        let orderedSamples = samples.sorted { $0.startDate < $1.startDate }
+
+        for sample in orderedSamples {
+            let bpm = sample.quantity.doubleValue(for: bpmUnit)
+            let gapDescription: String
+            if let lastSampleAt = noBuilderValidationLastSampleAt {
+                let gap = sample.startDate.timeIntervalSince(lastSampleAt)
+                gapDescription = " gap=\(formatInterval(gap))"
+            } else {
+                gapDescription = ""
+            }
+
+            noBuilderValidationSampleCount += 1
+            noBuilderValidationLastSampleAt = sample.startDate
+            noBuilderValidationLastSampleDescription = "\(formatBPM(bpm)) BPM at \(formatTimestamp(sample.startDate))"
+            noBuilderValidationStatus = "Active — \(noBuilderValidationSampleCount) sample(s)"
+            log(
+                "VALIDATION",
+                "No-builder sample #\(noBuilderValidationSampleCount) \(formatBPM(bpm)) BPM at \(formatTimestamp(sample.startDate))\(gapDescription)"
+            )
+        }
+    }
+
+    private func finishNoBuilderValidationStop(startedAt: Date?, sampleCount: Int) {
+        let elapsed = startedAt.map { formatElapsed(Date().timeIntervalSince($0)) } ?? "--"
+        isNoBuilderValidationActive = false
+        noBuilderValidationStartedAt = nil
+        noBuilderValidationLastSampleAt = nil
+        noBuilderValidationStatus = "Stopped — \(sampleCount) sample(s) over \(elapsed)"
+        log(
+            "VALIDATION",
+            "No-builder workout validation stopped after \(elapsed). totalSamples=\(sampleCount)"
+        )
+        queueActiveLogTransfer()
+    }
+    #endif
 
     // MARK: - HomeKit Lights
 
@@ -1261,6 +1883,39 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
             }
             if toState == .ended {
                 self.isWorkoutSessionRunning = false
+                #if DEBUG
+                if self.isNoBuilderValidationActive {
+                    let sampleCount = self.noBuilderValidationSampleCount
+                    let startedAt = self.noBuilderValidationStartedAt
+                    self.finishNoBuilderValidationStop(startedAt: startedAt, sampleCount: sampleCount)
+                    self.log(
+                        "VALIDATION",
+                        "No-builder validation session ended externally",
+                        level: .warning
+                    )
+                    return
+                }
+                #endif
+                if self.isProactiveWorkoutRunning,
+                   !self.isMonitoringActive,
+                   !self.isMonitoringStartupInProgress {
+                    self.isProactiveWorkoutRunning = false
+                    self.log(
+                        "HEALTHKIT",
+                        "Proactive workout session ended before monitoring started",
+                        level: .warning
+                    )
+                    return
+                }
+                if self.isMonitoringStartupInProgress && !self.isMonitoringActive {
+                    self.isDegradedMode = true
+                    self.log(
+                        "SESSION",
+                        "Workout session ended during monitoring startup — marking degraded startup result",
+                        level: .warning
+                    )
+                    return
+                }
                 if self.isMonitoringActive && !self.isDegradedMode {
                     self.log(
                         "SESSION",
@@ -1268,7 +1923,8 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                         level: .warning
                     )
                     self.isDegradedMode = true
-                    // Keep monitoring alive — wake check timer and HR query may still work
+                    // Keep monitoring alive — sample-driven checks and the
+                    // exact-wake/window/seed timers remain active.
                 }
             }
         }
@@ -1293,6 +1949,40 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                 return
             }
             self.isWorkoutSessionRunning = false
+            #if DEBUG
+            if self.isNoBuilderValidationActive {
+                let sampleCount = self.noBuilderValidationSampleCount
+                let startedAt = self.noBuilderValidationStartedAt
+                self.noBuilderValidationSeedProbeStatus = "Session failed: \(error.localizedDescription)"
+                self.finishNoBuilderValidationStop(startedAt: startedAt, sampleCount: sampleCount)
+                self.log(
+                    "VALIDATION",
+                    "No-builder validation session failed: \(error.localizedDescription)",
+                    level: .error
+                )
+                return
+            }
+            #endif
+            if self.isProactiveWorkoutRunning,
+               !self.isMonitoringActive,
+               !self.isMonitoringStartupInProgress {
+                self.isProactiveWorkoutRunning = false
+                self.log(
+                    "HEALTHKIT",
+                    "Proactive workout session failed before monitoring started: \(error.localizedDescription)",
+                    level: .error
+                )
+                return
+            }
+            if self.isMonitoringStartupInProgress && !self.isMonitoringActive {
+                self.isDegradedMode = true
+                self.log(
+                    "SESSION",
+                    "Workout session failed during monitoring startup — marking degraded startup result",
+                    level: .warning
+                )
+                return
+            }
             if self.isMonitoringActive && !self.isDegradedMode {
                 self.log(
                     "SESSION",

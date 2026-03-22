@@ -15,8 +15,16 @@ final class WakeHeuristicEngine {
     private(set) var baselineSampleCount = 0
     private(set) var baselineFrozenAt: Date?
     private(set) var hasTriggered = false
+    private var didLogBaselineNotReadyInWakeWindow = false
+    private var didLogAlreadyTriggeredRejection = false
+    /// Prevents baseline freeze until the historical seed has had a chance to
+    /// populate the baseline when monitoring starts inside the wake window.
+    var awaitingHistoricalSeed = false
+    private var awaitingSeedSince: Date?
+    private let seedTimeout: TimeInterval = 30
 
     var logHandler: ((SmartWakeLogLevel, String) -> Void)?
+    var verboseDiagnosticsProvider: (() -> Bool)?
 
     // Configuration
     let hrRiseThreshold: Double = 5.0
@@ -26,9 +34,9 @@ final class WakeHeuristicEngine {
     var currentConfidence: Double = 0
     var lastTriggerDate: Date?
 
-    private let baselineLookback: TimeInterval = 3600
+    private let baselineLookback: TimeInterval = 7200
     private let baselineCutoffBeforeWindow: TimeInterval = 300
-    private let minimumBaselineSamples = 8
+    private let minimumBaselineSamples = 5
     private let minimumBaselineSpan: TimeInterval = 900
     private let retainedHistoryWindow: TimeInterval = 7200
 
@@ -37,6 +45,8 @@ final class WakeHeuristicEngine {
     func configure(wakeWindowStart: Date) {
         reset()
         self.wakeWindowStart = wakeWindowStart
+        awaitingHistoricalSeed = true
+        awaitingSeedSince = Date()
         let baselineStart = wakeWindowStart.addingTimeInterval(-baselineLookback)
         let baselineEnd = wakeWindowStart.addingTimeInterval(-baselineCutoffBeforeWindow)
         log(
@@ -70,6 +80,8 @@ final class WakeHeuristicEngine {
                 "Seeded \(validSamples.count) heart-rate sample(s) spanning \(formatDate(firstSample.date)) -> \(formatDate(lastSample.date))"
             )
         }
+        awaitingHistoricalSeed = false
+        awaitingSeedSince = nil
         refreshMetrics(referenceDate: referenceDate)
     }
 
@@ -108,8 +120,23 @@ final class WakeHeuristicEngine {
         heartRateSamples.removeAll { $0.date < cutoff }
     }
 
-    private func freezeBaselineIfNeeded(referenceDate: Date) {
+    private func freezeBaselineIfNeeded(referenceDate _: Date) {
         let now = Date()
+
+        if awaitingHistoricalSeed {
+            if let since = awaitingSeedSince,
+               now.timeIntervalSince(since) > seedTimeout {
+                awaitingHistoricalSeed = false
+                awaitingSeedSince = nil
+                log(
+                    "Seed timeout (\(Int(seedTimeout))s) — proceeding with baseline freeze",
+                    level: .warning
+                )
+            } else {
+                return
+            }
+        }
+
         guard baselineFrozenAt == nil,
               let wakeWindowStart,
               now >= wakeWindowStart else { return }
@@ -147,7 +174,7 @@ final class WakeHeuristicEngine {
               lastDate.timeIntervalSince(firstDate) >= minimumBaselineSpan else {
             baselineHeartRate = nil
             baselineReady = false
-            log(
+            verboseLog(
                 "Baseline check at \(formatDate(referenceDate)): candidates=\(candidates.count) span=\(formatDuration(span)) window=\(formatDate(baselineStart)) -> \(formatDate(baselineEnd)) result=not ready",
                 level: .warning
             )
@@ -156,7 +183,7 @@ final class WakeHeuristicEngine {
 
         baselineHeartRate = median(candidates.map(\.bpm))
         baselineReady = baselineHeartRate != nil
-        log(
+        verboseLog(
             "Baseline check at \(formatDate(referenceDate)): candidates=\(candidates.count) span=\(formatDuration(span)) baseline=\(formatBPM(baselineHeartRate)) BPM result=\(baselineReady ? "ready" : "not ready")"
         )
     }
@@ -170,7 +197,7 @@ final class WakeHeuristicEngine {
             latestHRVStdDev = nil
             latestHRVScore = 0
             currentConfidence = 0
-            log(
+            verboseLog(
                 "Confidence update at \(formatDate(referenceDate)): baselineReady=\(baselineReady) latest=\(formatBPM(self.latestHeartRate)) confidence=0.000",
                 level: baselineReady ? .warning : .info
             )
@@ -203,7 +230,7 @@ final class WakeHeuristicEngine {
         latestHRVScore = hrvScore
 
         currentConfidence = hrScore + hrvScore
-        log(
+        verboseLog(
             "Confidence update at \(formatDate(referenceDate)): latest=\(formatBPM(latestHeartRate)) baseline=\(formatBPM(baselineHeartRate)) hrDelta=\(formatBPM(hrDelta)) hrScore=\(formatScore(hrScore)) hrvStdDev=\(formatBPM(latestHRVStdDev)) hrvScore=\(formatScore(hrvScore)) confidence=\(formatScore(currentConfidence))"
         )
     }
@@ -216,31 +243,37 @@ final class WakeHeuristicEngine {
         }
 
         guard inWakeWindow else {
-            log(
+            verboseLog(
                 "Wake evaluation at \(formatDate(now)): outside wake window -> not triggering"
             )
             return false
         }
 
         guard !hasTriggered else {
-            log(
-                "Wake evaluation at \(formatDate(now)): already triggered at \(formatDate(lastTriggerDate)) -> not triggering",
-                level: .warning
-            )
+            if !didLogAlreadyTriggeredRejection {
+                didLogAlreadyTriggeredRejection = true
+                log(
+                    "Wake evaluation at \(formatDate(now)): already triggered at \(formatDate(lastTriggerDate)) -> not triggering",
+                    level: .warning
+                )
+            }
             return false
         }
 
         guard baselineReady else {
-            log(
-                "Wake evaluation at \(formatDate(now)): baseline not ready (samples=\(baselineSampleCount), frozen=\(baselineFrozenAt != nil)) -> not triggering",
-                level: .warning
-            )
+            if !didLogBaselineNotReadyInWakeWindow {
+                didLogBaselineNotReadyInWakeWindow = true
+                log(
+                    "Wake evaluation at \(formatDate(now)): baseline not ready (samples=\(baselineSampleCount), frozen=\(baselineFrozenAt != nil)) -> not triggering",
+                    level: .warning
+                )
+            }
             return false
         }
 
         if let lastTriggerDate,
            now.timeIntervalSince(lastTriggerDate) < cooldownInterval {
-            log(
+            verboseLog(
                 "Wake evaluation at \(formatDate(now)): cooldown active after trigger at \(formatDate(lastTriggerDate)) -> not triggering",
                 level: .warning
             )
@@ -249,10 +282,13 @@ final class WakeHeuristicEngine {
 
         let shouldTrigger = currentConfidence >= confidenceThreshold
         let verdict = shouldTrigger ? "TRIGGER" : "WAIT"
-        log(
-            "Wake evaluation at \(formatDate(now)): latest=\(formatBPM(latestHeartRate)) baseline=\(formatBPM(baselineHeartRate)) hrDelta=\(formatBPM(latestHRDelta)) hrScore=\(formatScore(latestHRScore)) hrvStdDev=\(formatBPM(latestHRVStdDev)) hrvScore=\(formatScore(latestHRVScore)) confidence=\(formatScore(currentConfidence)) threshold=\(formatScore(confidenceThreshold)) -> \(verdict)",
-            level: shouldTrigger ? .info : .warning
-        )
+        let message =
+            "Wake evaluation at \(formatDate(now)): latest=\(formatBPM(latestHeartRate)) baseline=\(formatBPM(baselineHeartRate)) hrDelta=\(formatBPM(latestHRDelta)) hrScore=\(formatScore(latestHRScore)) hrvStdDev=\(formatBPM(latestHRVStdDev)) hrvScore=\(formatScore(latestHRVScore)) confidence=\(formatScore(currentConfidence)) threshold=\(formatScore(confidenceThreshold)) -> \(verdict)"
+        if shouldTrigger {
+            log(message)
+        } else {
+            verboseLog(message, level: .warning)
+        }
         return shouldTrigger
     }
 
@@ -277,6 +313,10 @@ final class WakeHeuristicEngine {
         currentConfidence = 0
         hasTriggered = false
         lastTriggerDate = nil
+        didLogBaselineNotReadyInWakeWindow = false
+        didLogAlreadyTriggeredRejection = false
+        awaitingHistoricalSeed = false
+        awaitingSeedSince = nil
     }
 
     // MARK: - Diagnostics
@@ -304,6 +344,11 @@ final class WakeHeuristicEngine {
 
     private func log(_ message: String, level: SmartWakeLogLevel = .info) {
         logHandler?(level, message)
+    }
+
+    private func verboseLog(_ message: String, level: SmartWakeLogLevel = .info) {
+        guard verboseDiagnosticsProvider?() ?? false else { return }
+        log(message, level: level)
     }
 
     private func formatDate(_ date: Date?) -> String {
