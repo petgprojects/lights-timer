@@ -311,7 +311,21 @@ struct ScheduleDetailView: View {
                 generator.impactOccurred(intensity: 0.5)
             }
         case .alarm:
-            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            let generator = UINotificationFeedbackGenerator()
+            generator.notificationOccurred(.warning)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                generator.notificationOccurred(.warning)
+            }
+        case .critical:
+            let notificationGenerator = UINotificationFeedbackGenerator()
+            let impactGenerator = UIImpactFeedbackGenerator(style: .rigid)
+            notificationGenerator.notificationOccurred(.error)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                impactGenerator.impactOccurred(intensity: 1.0)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+                notificationGenerator.notificationOccurred(.warning)
+            }
         }
     }
 

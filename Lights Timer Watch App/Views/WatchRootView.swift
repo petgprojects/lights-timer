@@ -409,10 +409,28 @@ struct WatchRootView: View {
         #if os(watchOS)
         let device = WKInterfaceDevice.current()
         switch pattern {
-        case .gentle: device.play(.click)
-        case .pulse: device.play(.start)
-        case .heartbeat: device.play(.directionUp)
-        case .alarm: device.play(.notification)
+        case .gentle:
+            device.play(.click)
+        case .pulse:
+            device.play(.start)
+        case .heartbeat:
+            device.play(.directionUp)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                WKInterfaceDevice.current().play(.click)
+            }
+        case .alarm:
+            device.play(.notification)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                WKInterfaceDevice.current().play(.retry)
+            }
+        case .critical:
+            device.play(.failure)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                WKInterfaceDevice.current().play(.notification)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+                WKInterfaceDevice.current().play(.retry)
+            }
         }
         #endif
     }

@@ -5,6 +5,13 @@ import HomeKit
 import WatchKit
 #endif
 
+#if os(watchOS)
+private struct WatchHapticBeat {
+    let delay: TimeInterval
+    let type: WKHapticType
+}
+#endif
+
 private enum WatchFallbackMode {
     case earlyRamp
     case exactWakeFinalState
@@ -92,8 +99,11 @@ final class SmartWakeSessionController: NSObject {
     private var hapticTimer: Timer?
     private var hapticStartTime: Date?
     private var lastHapticPlayTime: Date?
-    private var pendingFollowUpBeat = false
+    #if os(watchOS)
+    private var pendingFollowUpBeats: [WatchHapticBeat] = []
+    #endif
     private let hapticDuration: TimeInterval = 60
+    private let hapticTimerResolution: TimeInterval = 0.1
     private let historicalSeedLookback: TimeInterval = 7200
     private let historicalSeedTimeout: TimeInterval = 30
     private let watchLightHandoffDelay: TimeInterval = 8
@@ -1921,12 +1931,13 @@ final class SmartWakeSessionController: NSObject {
         stopHaptics()
         hapticStartTime = Date()
         lastHapticPlayTime = nil
-        pendingFollowUpBeat = false
+        pendingFollowUpBeats = []
 
-        playHapticForPattern(hapticPatternType, isSecondBeat: false)
+        playHaptic(primaryHapticType(for: hapticPatternType))
         lastHapticPlayTime = Date()
+        pendingFollowUpBeats = followUpBeats(for: hapticPatternType)
 
-        hapticTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+        hapticTimer = Timer.scheduledTimer(withTimeInterval: hapticTimerResolution, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.hapticTimerTick()
             }
@@ -1944,7 +1955,9 @@ final class SmartWakeSessionController: NSObject {
         hapticTimer = nil
         hapticStartTime = nil
         lastHapticPlayTime = nil
-        pendingFollowUpBeat = false
+        #if os(watchOS)
+        pendingFollowUpBeats = []
+        #endif
         log("HAPTICS", "Haptic playback stopped")
     }
 
@@ -1954,9 +1967,9 @@ final class SmartWakeSessionController: NSObject {
 
         let elapsed = Date().timeIntervalSince(startTime)
         if elapsed >= hapticDuration {
-            WKInterfaceDevice.current().play(.notification)
+            playHaptic(finalHapticType(for: hapticPatternType))
             stopHaptics()
-            log("HAPTICS", "Haptic ramp reached completion and played final notification")
+            log("HAPTICS", "Haptic ramp reached completion and played final completion haptic")
             return
         }
 
@@ -1964,34 +1977,53 @@ final class SmartWakeSessionController: NSObject {
         let interval = nextInterval(for: hapticPatternType, progress: progress)
         let timeSinceLastPlay = lastHapticPlayTime.map { Date().timeIntervalSince($0) } ?? .infinity
 
-        let followUpDelay = followUpDelay(for: hapticPatternType)
-
-        if pendingFollowUpBeat, let followUpDelay, timeSinceLastPlay >= followUpDelay {
-            playHapticForPattern(hapticPatternType, isSecondBeat: true)
-            pendingFollowUpBeat = false
+        if let followUpBeat = pendingFollowUpBeats.first, timeSinceLastPlay >= followUpBeat.delay {
+            playHaptic(followUpBeat.type)
+            pendingFollowUpBeats.removeFirst()
             lastHapticPlayTime = Date()
             return
         }
 
+        guard pendingFollowUpBeats.isEmpty else { return }
         guard timeSinceLastPlay >= interval else { return }
 
-        playHapticForPattern(hapticPatternType, isSecondBeat: false)
+        playHaptic(primaryHapticType(for: hapticPatternType))
         lastHapticPlayTime = Date()
-        pendingFollowUpBeat = followUpDelay != nil
+        pendingFollowUpBeats = followUpBeats(for: hapticPatternType)
     }
 
-    private func playHapticForPattern(_ pattern: HapticPattern, isSecondBeat: Bool) {
-        let device = WKInterfaceDevice.current()
+    private func playHaptic(_ type: WKHapticType) {
+        WKInterfaceDevice.current().play(type)
+    }
 
+    private func primaryHapticType(for pattern: HapticPattern) -> WKHapticType {
         switch pattern {
         case .gentle:
-            device.play(.click)
+            .click
         case .pulse:
-            device.play(.start)
+            .start
         case .heartbeat:
-            device.play(isSecondBeat ? .click : .directionUp)
+            .directionUp
         case .alarm:
-            device.play(isSecondBeat ? .retry : .notification)
+            .notification
+        case .critical:
+            .failure
+        }
+    }
+
+    private func followUpBeats(for pattern: HapticPattern) -> [WatchHapticBeat] {
+        switch pattern {
+        case .gentle, .pulse:
+            []
+        case .heartbeat:
+            [WatchHapticBeat(delay: 0.3, type: .click)]
+        case .alarm:
+            [WatchHapticBeat(delay: 0.25, type: .retry)]
+        case .critical:
+            [
+                WatchHapticBeat(delay: 0.16, type: .notification),
+                WatchHapticBeat(delay: 0.18, type: .retry)
+            ]
         }
     }
 
@@ -2005,15 +2037,17 @@ final class SmartWakeSessionController: NSObject {
             return 4.0 - 2.5 * progress
         case .alarm:
             return 0.9 - 0.55 * progress
+        case .critical:
+            return 0.6 - 0.35 * progress
         }
     }
 
-    private func followUpDelay(for pattern: HapticPattern) -> TimeInterval? {
+    private func finalHapticType(for pattern: HapticPattern) -> WKHapticType {
         switch pattern {
-        case .heartbeat, .alarm:
-            return 0.3
-        case .gentle, .pulse:
-            return nil
+        case .critical:
+            .failure
+        case .gentle, .pulse, .heartbeat, .alarm:
+            .notification
         }
     }
     #endif

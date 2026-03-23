@@ -129,6 +129,7 @@ enum HapticPattern: String, Codable, CaseIterable, Identifiable {
     case pulse
     case heartbeat
     case alarm
+    case critical
 
     var id: String { rawValue }
 
@@ -138,6 +139,7 @@ enum HapticPattern: String, Codable, CaseIterable, Identifiable {
         case .pulse: "Pulse"
         case .heartbeat: "Heartbeat"
         case .alarm: "Alarm"
+        case .critical: "Critical"
         }
     }
 
@@ -147,6 +149,7 @@ enum HapticPattern: String, Codable, CaseIterable, Identifiable {
         case .pulse: "Rhythmic pulses that build"
         case .heartbeat: "Heartbeat-like double taps"
         case .alarm: "Aggressive alarm bursts with rapid follow-up taps"
+        case .critical: "Maximum-strength triple bursts using the strongest watch haptics available to the app"
         }
     }
 
@@ -156,6 +159,7 @@ enum HapticPattern: String, Codable, CaseIterable, Identifiable {
         case .pulse: "waveform.path"
         case .heartbeat: "heart.fill"
         case .alarm: "alarm.fill"
+        case .critical: "exclamationmark.triangle.fill"
         }
     }
 }
