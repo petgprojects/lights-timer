@@ -2,7 +2,12 @@ import Foundation
 
 @Observable
 final class WakeHeuristicEngine {
-    private var heartRateSamples: [(date: Date, bpm: Double)] = []
+    private enum HeartRateSampleSource {
+        case historicalSeed
+        case realtime
+    }
+
+    private var heartRateSamples: [(date: Date, bpm: Double, source: HeartRateSampleSource)] = []
     private var wakeWindowStart: Date?
     private var latestHRDelta: Double?
     private var latestHRScore: Double = 0
@@ -17,6 +22,7 @@ final class WakeHeuristicEngine {
     private(set) var hasTriggered = false
     private var didLogBaselineNotReadyInWakeWindow = false
     private var didLogAlreadyTriggeredRejection = false
+    private var didLogAwaitingRealtimeWakeSample = false
     /// Prevents baseline freeze until the historical seed has had a chance to
     /// populate the baseline when monitoring starts inside the wake window.
     var awaitingHistoricalSeed = false
@@ -72,7 +78,11 @@ final class WakeHeuristicEngine {
             log("All \(samples.count) historical sample(s) had future dates — seed discarded", level: .warning)
             return
         }
-        heartRateSamples.append(contentsOf: validSamples)
+        heartRateSamples.append(
+            contentsOf: validSamples.map { sample in
+                (date: sample.date, bpm: sample.bpm, source: .historicalSeed)
+            }
+        )
         heartRateSamples.sort { $0.date < $1.date }
         latestHeartRate = heartRateSamples.last?.bpm
         if let firstSample = validSamples.first, let lastSample = validSamples.last {
@@ -91,9 +101,10 @@ final class WakeHeuristicEngine {
             log("Rejected heart-rate sample with future date \(formatDate(date)) (now=\(formatDate(now)))", level: .warning)
             return
         }
-        heartRateSamples.append((date: date, bpm: bpm))
+        heartRateSamples.append((date: date, bpm: bpm, source: .realtime))
         heartRateSamples.sort { $0.date < $1.date }
         latestHeartRate = heartRateSamples.last?.bpm
+        didLogAwaitingRealtimeWakeSample = false
         refreshMetrics(referenceDate: date)
     }
 
@@ -271,6 +282,31 @@ final class WakeHeuristicEngine {
             return false
         }
 
+        guard let latestSample = heartRateSamples.last else {
+            if !didLogAwaitingRealtimeWakeSample {
+                didLogAwaitingRealtimeWakeSample = true
+                log(
+                    "Wake evaluation at \(formatDate(now)): waiting for a post-monitoring heart-rate sample before early trigger",
+                    level: .warning
+                )
+            }
+            return false
+        }
+
+        guard latestSample.source == .realtime,
+              let wakeWindowStart,
+              latestSample.date >= wakeWindowStart else {
+            if !didLogAwaitingRealtimeWakeSample {
+                didLogAwaitingRealtimeWakeSample = true
+                let latestSourceDescription = latestSample.source == .realtime ? "realtime" : "historical"
+                log(
+                    "Wake evaluation at \(formatDate(now)): latest sample is \(latestSourceDescription) at \(formatDate(latestSample.date)); waiting for a post-monitoring wake-window sample before early trigger",
+                    level: .warning
+                )
+            }
+            return false
+        }
+
         if let lastTriggerDate,
            now.timeIntervalSince(lastTriggerDate) < cooldownInterval {
             verboseLog(
@@ -315,6 +351,7 @@ final class WakeHeuristicEngine {
         lastTriggerDate = nil
         didLogBaselineNotReadyInWakeWindow = false
         didLogAlreadyTriggeredRejection = false
+        didLogAwaitingRealtimeWakeSample = false
         awaitingHistoricalSeed = false
         awaitingSeedSince = nil
     }

@@ -83,6 +83,9 @@ final class SmartWakeSessionController: NSObject {
     private var historicalSeedTask: Task<Void, Never>?
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
+    private var workoutRecoveryRetryTask: Task<Void, Never>?
+    private var workoutRecoveryRetryAttempts = 0
+    private var didLogWorkoutRecoveryRetryExhaustion = false
 
     private(set) var currentSchedule: WatchScheduleSnapshot?
     private var wakeUpTime: Date?
@@ -107,6 +110,9 @@ final class SmartWakeSessionController: NSObject {
     private let historicalSeedLookback: TimeInterval = 7200
     private let historicalSeedTimeout: TimeInterval = 30
     private let watchLightHandoffDelay: TimeInterval = 8
+    private let workoutRecoveryRetryDelay: TimeInterval = 8
+    private let workoutRecoveryRetryValidationDelay: TimeInterval = 3
+    private let maxWorkoutRecoveryRetryAttempts = 2
     private var seenSampleUUIDs = Set<UUID>()
     private var isPassiveObservationEnabled = false
 
@@ -500,6 +506,7 @@ final class SmartWakeSessionController: NSObject {
         currentScheduleID = schedule.id
         self.wakeUpTime = wakeUpTime
         self.windowStartTime = windowStartTime
+        resetWorkoutRecoveryRetryState()
         lastHRSampleDate = nil
         didLogWakeWindowStart = false
         heuristicEngine.configure(wakeWindowStart: windowStartTime)
@@ -549,6 +556,9 @@ final class SmartWakeSessionController: NSObject {
                             level: .warning
                         )
                         startDegradedMonitoring()
+                        scheduleWorkoutRecoveryRetryIfNeeded(
+                            reason: "workout session ended during monitoring startup"
+                        )
                         return
                     }
 
@@ -571,6 +581,9 @@ final class SmartWakeSessionController: NSObject {
                         level: .warning
                     )
                     startDegradedMonitoring()
+                    scheduleWorkoutRecoveryRetryIfNeeded(
+                        reason: "workout session ended during monitoring startup"
+                    )
                     return
                 }
 
@@ -593,6 +606,9 @@ final class SmartWakeSessionController: NSObject {
                 level: .warning
             )
             startDegradedMonitoring()
+            scheduleWorkoutRecoveryRetryIfNeeded(
+                reason: "workout startup threw \(error.localizedDescription)"
+            )
         }
     }
 
@@ -735,6 +751,7 @@ final class SmartWakeSessionController: NSObject {
         seenSampleUUIDs.removeAll()
         lastHRSampleDate = nil
         isMonitoringStartupInProgress = false
+        resetWorkoutRecoveryRetryState()
     }
 
     // MARK: - Handoff
@@ -820,7 +837,7 @@ final class SmartWakeSessionController: NSObject {
         try await builder.beginCollection(at: Date())
         isProactiveWorkoutRunning = false
         isWorkoutSessionRunning = true
-        log("HEALTHKIT", "Workout session started and live collection began")
+        log("HEALTHKIT", "Workout session start request completed; awaiting running state")
     }
 
     private func endWorkoutSession() async {
@@ -955,6 +972,186 @@ final class SmartWakeSessionController: NSObject {
         workoutSession != nil && isWorkoutSessionRunning
     }
 
+    private func resetWorkoutRecoveryRetryState() {
+        workoutRecoveryRetryTask?.cancel()
+        workoutRecoveryRetryTask = nil
+        workoutRecoveryRetryAttempts = 0
+        didLogWorkoutRecoveryRetryExhaustion = false
+    }
+
+    private func scheduleWorkoutRecoveryRetryIfNeeded(reason: String) {
+        guard isMonitoringActive, isDegradedMode, sessionState == .monitoring else { return }
+        guard activeTriggerID == nil else { return }
+        guard workoutRecoveryRetryTask == nil else { return }
+        guard let wakeUpTime else { return }
+
+        let timeRemaining = wakeUpTime.timeIntervalSinceNow
+        guard timeRemaining > 1 else {
+            if !didLogWorkoutRecoveryRetryExhaustion {
+                didLogWorkoutRecoveryRetryExhaustion = true
+                log(
+                    "SESSION",
+                    "Skipping workout recovery retry because wake time is imminent",
+                    level: .warning
+                )
+            }
+            return
+        }
+
+        guard workoutRecoveryRetryAttempts < maxWorkoutRecoveryRetryAttempts else {
+            if !didLogWorkoutRecoveryRetryExhaustion {
+                didLogWorkoutRecoveryRetryExhaustion = true
+                log(
+                    "SESSION",
+                    "Workout recovery retry budget exhausted; remaining in degraded mode until wake time",
+                    level: .warning
+                )
+            }
+            return
+        }
+
+        let attempt = workoutRecoveryRetryAttempts + 1
+        workoutRecoveryRetryAttempts = attempt
+        let delay = min(workoutRecoveryRetryDelay, timeRemaining - 1)
+
+        log(
+            "SESSION",
+            "Scheduling workout recovery retry \(attempt)/\(maxWorkoutRecoveryRetryAttempts) in \(formatInterval(delay)) (\(reason))",
+            level: .warning
+        )
+
+        workoutRecoveryRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                self.workoutRecoveryRetryTask = nil
+                return
+            }
+
+            guard self.isMonitoringActive,
+                  self.isDegradedMode,
+                  self.sessionState == .monitoring,
+                  self.activeTriggerID == nil,
+                  let wakeUpTime = self.wakeUpTime,
+                  Date() < wakeUpTime else {
+                self.workoutRecoveryRetryTask = nil
+                return
+            }
+
+            self.clearWorkoutSessionReference(
+                reason: "Clearing failed workout state before recovery retry \(attempt)",
+                level: .warning
+            )
+            self.log(
+                "SESSION",
+                "Retrying workout startup while degraded monitoring is active (attempt \(attempt)/\(self.maxWorkoutRecoveryRetryAttempts))",
+                level: .warning
+            )
+
+            do {
+                try await self.startWorkoutSession()
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) start request completed; waiting \(self.formatInterval(self.workoutRecoveryRetryValidationDelay)) for a stable running state"
+                )
+            } catch {
+                self.workoutRecoveryRetryTask = nil
+                self.clearWorkoutSessionReference(
+                    reason: "Clearing workout state after recovery retry \(attempt) failed",
+                    level: .warning
+                )
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) failed: \(error.localizedDescription)",
+                    level: .warning
+                )
+                self.scheduleWorkoutRecoveryRetryIfNeeded(reason: "retry \(attempt) failed")
+                return
+            }
+
+            do {
+                try await Task.sleep(for: .seconds(self.workoutRecoveryRetryValidationDelay))
+            } catch {
+                self.workoutRecoveryRetryTask = nil
+                return
+            }
+
+            self.workoutRecoveryRetryTask = nil
+
+            guard self.isMonitoringActive, self.sessionState == .monitoring else { return }
+
+            if self.isDegradedMode {
+                self.clearWorkoutSessionReference(
+                    reason: "Clearing workout state after recovery retry \(attempt) did not stabilize",
+                    level: .warning
+                )
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) did not recover live workout execution",
+                    level: .warning
+                )
+                self.scheduleWorkoutRecoveryRetryIfNeeded(reason: "retry \(attempt) did not stabilize")
+            } else {
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) stabilized; full monitoring resumed"
+                )
+            }
+        }
+    }
+
+    func attemptForegroundWorkoutRecoveryIfNeeded(reason: String) {
+        guard isMonitoringActive, isDegradedMode, sessionState == .monitoring else { return }
+        guard activeTriggerID == nil else { return }
+        guard let wakeUpTime, Date() < wakeUpTime else { return }
+
+        if workoutRecoveryRetryTask != nil {
+            log(
+                "SESSION",
+                "Cancelling delayed workout recovery retry in favor of immediate foreground attempt (\(reason))",
+                level: .warning
+            )
+        }
+        workoutRecoveryRetryTask?.cancel()
+        workoutRecoveryRetryTask = nil
+
+        clearWorkoutSessionReference(
+            reason: "Clearing degraded workout state before foreground recovery attempt",
+            level: .warning
+        )
+        log(
+            "SESSION",
+            "Attempting immediate workout recovery from foreground (\(reason))",
+            level: .warning
+        )
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.startWorkoutSession()
+                self.log(
+                    "SESSION",
+                    "Foreground workout recovery start request completed; awaiting running state"
+                )
+            } catch {
+                self.clearWorkoutSessionReference(
+                    reason: "Clearing workout state after foreground recovery failure",
+                    level: .warning
+                )
+                self.log(
+                    "SESSION",
+                    "Foreground workout recovery failed: \(error.localizedDescription)",
+                    level: .warning
+                )
+                self.scheduleWorkoutRecoveryRetryIfNeeded(
+                    reason: "foreground recovery failed"
+                )
+            }
+        }
+    }
+
     private func beginMonitoringDataFlow(
         wakeUpTime: Date,
         windowStartTime: Date
@@ -969,7 +1166,7 @@ final class SmartWakeSessionController: NSObject {
         checkForWakeTrigger()
         startHistoricalSeed(
             from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
-            to: Date()
+            to: historicalSeedEndDate(windowStartTime: windowStartTime)
         )
     }
 
@@ -993,7 +1190,7 @@ final class SmartWakeSessionController: NSObject {
         if let windowStartTime {
             startHistoricalSeed(
                 from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
-                to: Date()
+                to: historicalSeedEndDate(windowStartTime: windowStartTime)
             )
         }
 
@@ -1001,6 +1198,10 @@ final class SmartWakeSessionController: NSObject {
     }
 
     // MARK: - Heart Rate Query
+
+    private func historicalSeedEndDate(windowStartTime: Date) -> Date {
+        min(Date(), windowStartTime)
+    }
 
     private func startHistoricalSeed(from startDate: Date, to endDate: Date) {
         historicalSeedTask?.cancel()
@@ -2075,6 +2276,22 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                 )
                 return
             }
+            if toState == .running {
+                self.isWorkoutSessionRunning = true
+                if self.isMonitoringActive && self.isDegradedMode {
+                    self.isDegradedMode = false
+                    self.log(
+                        "SESSION",
+                        "Workout session entered running state during degraded monitoring — resuming full monitoring"
+                    )
+                } else if self.isMonitoringStartupInProgress {
+                    self.log(
+                        "SESSION",
+                        "Workout session entered running state during monitoring startup"
+                    )
+                }
+                return
+            }
             if toState == .ended {
                 self.isWorkoutSessionRunning = false
                 #if DEBUG
@@ -2119,6 +2336,9 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                     self.isDegradedMode = true
                     // Keep monitoring alive — sample-driven checks and the
                     // exact-wake/window/seed timers remain active.
+                    self.scheduleWorkoutRecoveryRetryIfNeeded(
+                        reason: "workout session ended during monitoring"
+                    )
                 }
             }
         }
@@ -2184,6 +2404,9 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                     level: .warning
                 )
                 self.isDegradedMode = true
+                self.scheduleWorkoutRecoveryRetryIfNeeded(
+                    reason: "workout session failed during monitoring"
+                )
             }
         }
     }

@@ -95,6 +95,7 @@ final class SmartAlarmScheduler: NSObject {
         sessionController.onTrigger = { [weak self] payload in
             self?.sessionManager.sendTrigger(payload)
             self?.handleWakeTriggered()
+            self?.signalAlarmPlayedToSystem()
         }
         sessionController.onPostTriggerWorkComplete = { [weak self] in
             self?.cleanUpAfterCompletedWake()
@@ -183,7 +184,6 @@ final class SmartAlarmScheduler: NSObject {
     // MARK: - Recovery
 
     func attachRecoveredExtendedRuntimeSession(_ session: WKExtendedRuntimeSession) {
-        session.delegate = self
         logStore.log(
             "SCHEDULER",
             "Attaching recovered extended runtime session. state=\(session.state.rawValue)"
@@ -218,6 +218,39 @@ final class SmartAlarmScheduler: NSObject {
             return
         }
 
+        if session.state == .scheduled, !record.isSessionScheduled {
+            restorePendingWakeState(
+                from: record,
+                reason: "discarding recovered session that was never actually armed"
+            )
+            armingState = restoredArmingState(from: record)
+            alarmSessionError = nil
+            isAlarmSessionActive = false
+            sessionController.isAlarmSessionActive = false
+            recoveredRunningBackstopWake = nil
+            logStore.log(
+                "SCHEDULER",
+                "Discarding recovered scheduled session because the persisted wake is only a foreground re-arm placeholder",
+                level: .warning
+            )
+            session.delegate = nil
+            session.invalidate()
+            return
+        }
+
+        if session.state == .scheduled,
+           let existingSession = extendedSession,
+           existingSession !== session,
+           existingSession.state == .scheduled || existingSession.state == .running {
+            logStore.log(
+                "SCHEDULER",
+                "Ignoring recovered scheduled session because the scheduler already owns a different in-memory session (state=\(existingSession.state.rawValue))",
+                level: .warning
+            )
+            return
+        }
+
+        session.delegate = self
         extendedSession = session
         restorePendingWakeState(
             from: record,
@@ -516,6 +549,9 @@ final class SmartAlarmScheduler: NSObject {
         isSceneActive = true
         logStore.log("SCHEDULER", "App returned to foreground — re-evaluating schedules")
         schedulesDidUpdate(sessionManager.activeSchedules)
+        sessionController.attemptForegroundWorkoutRecoveryIfNeeded(
+            reason: "app returned to foreground during degraded monitoring"
+        )
     }
 
     func onAppBackground() {
@@ -572,6 +608,28 @@ final class SmartAlarmScheduler: NSObject {
             "SCHEDULER",
             "Wake triggered — cleared pending monitoring state to prevent re-entry"
         )
+    }
+
+    /// Signals to watchOS that the alarm was played by calling notifyUser on the
+    /// extended runtime session. Without this, watchOS shows the "failed to play
+    /// a scheduled alarm" system prompt. The repeat handler returns the maximum
+    /// allowed interval (60s) so the session's built-in repeat is effectively
+    /// inert — the custom haptic ramp drives the actual user-facing pattern.
+    private func signalAlarmPlayedToSystem() {
+        guard let session = extendedSession,
+              session.state == .running else {
+            logStore.log(
+                "SCHEDULER",
+                "Cannot signal alarm to system — no running extended runtime session",
+                level: .warning
+            )
+            return
+        }
+
+        session.notifyUser(hapticType: .notification) { _ in
+            return 60.0
+        }
+        logStore.log("SCHEDULER", "Signaled alarm played to watchOS via notifyUser")
     }
 
     /// Called after all post-trigger work (haptics, handoff, light fallback, workout teardown) completes.
@@ -975,6 +1033,11 @@ final class SmartAlarmScheduler: NSObject {
         guard let pendingSchedule,
               let extendedSession,
               extendedSession.state == .scheduled || extendedSession.state == .running else {
+            return false
+        }
+
+        if extendedSession.state == .scheduled,
+           pendingWakeStore.loadPendingWakeRecord()?.isSessionScheduled == false {
             return false
         }
 
