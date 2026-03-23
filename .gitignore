@@ -4,7 +4,7 @@ DerivedData/
 
 # Xcode user data
 *.xcuserstate
-xcuserdata/
+*.xcodeproj/xcuserdata/*
 
 # macOS
 .DS_Store
@@ -24,3 +24,7 @@ Podfile.lock
 # Environment
 .env
 .env.local
+.claude/*
+logs/*
+Lights Timer.xcodeproj/xcuserdata/*
+Lights Timer.xcodeproj/xcuserdata/petergelgor.xcuserdatad/xcschemes/xcschememanagement.plist

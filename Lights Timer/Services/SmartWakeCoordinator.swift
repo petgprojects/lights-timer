@@ -12,6 +12,7 @@ final class SmartWakeCoordinator {
     private let watchConnectivity: WatchConnectivityService
     private let modelContainer: ModelContainer
     private let logStore: PhoneLogStore
+    private let settingsStore: SmartWakeSettingsStore
 
     private var firedToday: [UUID: Date] = [:]
     private var processedHandoffs: [UUID: ProcessedHandoffRecord] = [:]
@@ -28,12 +29,14 @@ final class SmartWakeCoordinator {
         scheduleEngine: ScheduleEngine,
         watchConnectivity: WatchConnectivityService,
         modelContainer: ModelContainer,
-        logStore: PhoneLogStore
+        logStore: PhoneLogStore,
+        settingsStore: SmartWakeSettingsStore
     ) {
         self.scheduleEngine = scheduleEngine
         self.watchConnectivity = watchConnectivity
         self.modelContainer = modelContainer
         self.logStore = logStore
+        self.settingsStore = settingsStore
 
         watchConnectivity.onSmartWakeTrigger = { [weak self] trigger in
             guard let self else { return }
@@ -316,8 +319,10 @@ final class SmartWakeCoordinator {
             let snapshots = schedules
                 .filter(\.usesSmartWake)
                 .map { WatchScheduleSnapshot(from: $0) }
-            watchConnectivity.sendSchedules(snapshots)
-            log("Synced \(snapshots.count) smart wake schedule(s) to watch")
+            watchConnectivity.sendSchedules(snapshots, powerMode: settingsStore.powerMode)
+            log(
+                "Synced \(snapshots.count) smart wake schedule(s) to watch with powerMode=\(settingsStore.powerMode.rawValue)"
+            )
         } catch {
             log("Failed to sync schedules: \(error)", level: .error)
         }

@@ -8,9 +8,18 @@
 
 /* Begin PBXBuildFile section */
 		4607915060E5F28CC4841715 /* Lights Timer Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 50157D01150E6077453CD365 /* Lights Timer Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7E861547BA78819DDC436BEE /* Lights Timer Widgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 12D1090F7EA91CF981B44524 /* Lights Timer Widgets.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F3D9390173C67CF34A30D0B9 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 653D12AED7856B68B97F1662 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		719243C6DA6E9977D093F72F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 064346A32F5FA57E0075E733 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5E88F657DF8583009DB777A4;
+			remoteInfo = "Lights Timer Widgets";
+		};
 		C3ED09517B57E9EF5E42E5C4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 064346A32F5FA57E0075E733 /* Project object */;
@@ -32,17 +41,35 @@
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		F4BA0E843C8C037EF575F35B /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7E861547BA78819DDC436BEE /* Lights Timer Widgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		064346AB2F5FA57E0075E733 /* Lights Timer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lights Timer.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		12D1090F7EA91CF981B44524 /* Lights Timer Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Lights Timer Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		50157D01150E6077453CD365 /* Lights Timer Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lights Timer Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		653D12AED7856B68B97F1662 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		064346AD2F5FA57E0075E733 /* Lights Timer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Lights Timer";
+			sourceTree = "<group>";
+		};
+		5676CEBE26B03DE0EE356935 /* Lights Timer Widgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Lights Timer Widgets";
 			sourceTree = "<group>";
 		};
 		5A82407A08046EE652A4784E /* Lights Timer Watch App */ = {
@@ -57,6 +84,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB9BB6DB241D78BA3D4DAF7E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F3D9390173C67CF34A30D0B9 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,6 +111,8 @@
 				064346AD2F5FA57E0075E733 /* Lights Timer */,
 				5A82407A08046EE652A4784E /* Lights Timer Watch App */,
 				064346AC2F5FA57E0075E733 /* Products */,
+				5676CEBE26B03DE0EE356935 /* Lights Timer Widgets */,
+				5405118AE52020D32C787DC7 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -84,8 +121,25 @@
 			children = (
 				064346AB2F5FA57E0075E733 /* Lights Timer.app */,
 				50157D01150E6077453CD365 /* Lights Timer Watch App.app */,
+				12D1090F7EA91CF981B44524 /* Lights Timer Widgets.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		183837E6FF5846B91DF2284C /* watchOS */ = {
+			isa = PBXGroup;
+			children = (
+				653D12AED7856B68B97F1662 /* Foundation.framework */,
+			);
+			name = watchOS;
+			sourceTree = "<group>";
+		};
+		5405118AE52020D32C787DC7 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				183837E6FF5846B91DF2284C /* watchOS */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -109,8 +163,6 @@
 				064346AD2F5FA57E0075E733 /* Lights Timer */,
 			);
 			name = "Lights Timer";
-			packageProductDependencies = (
-			);
 			productName = "Lights Timer";
 			productReference = 064346AB2F5FA57E0075E733 /* Lights Timer.app */;
 			productType = "com.apple.product-type.application";
@@ -122,10 +174,12 @@
 				62A01BBBE500A2EC9302E4E3 /* Sources */,
 				D433069E36978BD66F376FBF /* Frameworks */,
 				ABC0AA0EDED43414291139FE /* Resources */,
+				F4BA0E843C8C037EF575F35B /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AB04F9022B4D015F1A6D849E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5A82407A08046EE652A4784E /* Lights Timer Watch App */,
@@ -134,6 +188,26 @@
 			productName = "Lights Timer Watch App";
 			productReference = 50157D01150E6077453CD365 /* Lights Timer Watch App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		5E88F657DF8583009DB777A4 /* Lights Timer Widgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 761C39EA9EC0E6987E2C846F /* Build configuration list for PBXNativeTarget "Lights Timer Widgets" */;
+			buildPhases = (
+				EEE57E6F38F36658120B2443 /* Sources */,
+				AB9BB6DB241D78BA3D4DAF7E /* Frameworks */,
+				69C4DD5311B8993C85F7D5A8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5676CEBE26B03DE0EE356935 /* Lights Timer Widgets */,
+			);
+			name = "Lights Timer Widgets";
+			productName = "Lights Timer Widgets";
+			productReference = 12D1090F7EA91CF981B44524 /* Lights Timer Widgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -151,10 +225,21 @@
 					30A5401E61AB489059FFFA8C = {
 						CreatedOnToolsVersion = 26.2;
 						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
+								enabled = 1;
+							};
 							com.apple.BackgroundModes = {
 								enabled = 1;
 							};
 							com.apple.HealthKit = {
+								enabled = 1;
+							};
+						};
+					};
+					5E88F657DF8583009DB777A4 = {
+						CreatedOnToolsVersion = 26.2;
+						SystemCapabilities = {
+							com.apple.ApplicationGroups.iOS = {
 								enabled = 1;
 							};
 						};
@@ -177,12 +262,20 @@
 			targets = (
 				064346AA2F5FA57E0075E733 /* Lights Timer */,
 				30A5401E61AB489059FFFA8C /* Lights Timer Watch App */,
+				5E88F657DF8583009DB777A4 /* Lights Timer Widgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		064346A92F5FA57E0075E733 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		69C4DD5311B8993C85F7D5A8 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -213,6 +306,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EEE57E6F38F36658120B2443 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -221,6 +321,12 @@
 			name = "Lights Timer Watch App";
 			target = 30A5401E61AB489059FFFA8C /* Lights Timer Watch App */;
 			targetProxy = C3ED09517B57E9EF5E42E5C4 /* PBXContainerItemProxy */;
+		};
+		AB04F9022B4D015F1A6D849E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Lights Timer Widgets";
+			target = 5E88F657DF8583009DB777A4 /* Lights Timer Widgets */;
+			targetProxy = 719243C6DA6E9977D093F72F /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -371,12 +477,16 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -405,12 +515,16 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -474,6 +588,71 @@
 			};
 			name = Debug;
 		};
+		AB946C5B09EEE305F779400A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = "Lights Timer Widgets/Lights_Timer_Widgets.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 39JCQY86NE;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Lights-Timer-Widgets-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Lights Timer";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer.watchkitapp.widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Release;
+		};
+		D0FCD10D46E76F427A7CCE88 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = "Lights Timer Widgets/Lights_Timer_Widgets.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 39JCQY86NE;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Lights-Timer-Widgets-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Lights Timer";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer.watchkitapp.widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 26.2;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -500,6 +679,15 @@
 			buildConfigurations = (
 				226F0E718FA2E367AE53EE28 /* Debug */,
 				076746EB8C6B5EECF3624CBA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		761C39EA9EC0E6987E2C846F /* Build configuration list for PBXNativeTarget "Lights Timer Widgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB946C5B09EEE305F779400A /* Release */,
+				D0FCD10D46E76F427A7CCE88 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -7,6 +7,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var isPhoneReachable: Bool = false
     var lastLightHandoff: SmartWakeLightHandoffPayload?
     private(set) var hasLoadedInitialScheduleContext = false
+    private(set) var powerMode: SmartWakePowerMode = SmartWakeSharedStore.loadPowerMode()
 
     /// Called whenever schedules are received (including from background WCSession delivery).
     var onSchedulesUpdated: (([WatchScheduleSnapshot]) -> Void)?
@@ -15,7 +16,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     private let logStore: SmartWakeLogStore
     private var session: WCSession?
     private var hasProcessedIncomingApplicationContext = false
-    private var lastProcessedSchedulesPayload: Data?
+    private var lastProcessedSyncPayload: Data?
 
     init(logStore: SmartWakeLogStore) {
         self.logStore = logStore
@@ -282,17 +283,30 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
               type == WCMessageKey.schedulesUpdated,
               let data = context[WCMessageKey.payload] as? Data else { return }
 
-        guard lastProcessedSchedulesPayload != data else { return }
+        guard lastProcessedSyncPayload != data else { return }
 
         do {
-            let schedules = try JSONDecoder().decode([WatchScheduleSnapshot].self, from: data)
-            lastProcessedSchedulesPayload = data
-            activeSchedules = schedules
+            let decoder = JSONDecoder()
+            let syncPayload: SmartWakeSyncPayload
+            if let decoded = try? decoder.decode(SmartWakeSyncPayload.self, from: data) {
+                syncPayload = decoded
+            } else {
+                let schedules = try decoder.decode([WatchScheduleSnapshot].self, from: data)
+                syncPayload = SmartWakeSyncPayload(
+                    schedules: schedules,
+                    powerMode: powerMode
+                )
+            }
+
+            lastProcessedSyncPayload = data
+            powerMode = syncPayload.powerMode
+            SmartWakeSharedStore.savePowerMode(syncPayload.powerMode)
+            activeSchedules = syncPayload.schedules
             hasLoadedInitialScheduleContext = true
-            onSchedulesUpdated?(schedules)
+            onSchedulesUpdated?(syncPayload.schedules)
             logStore.log(
                 "CONNECTIVITY",
-                "Received \(schedules.count) smart-wake schedule snapshot(s) from phone"
+                "Received \(syncPayload.schedules.count) smart-wake schedule snapshot(s) from phone with powerMode=\(syncPayload.powerMode.rawValue)"
             )
         } catch {
             logStore.log(

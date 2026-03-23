@@ -135,6 +135,22 @@ struct WatchRootView: View {
                 }
                 .tint(.orange)
             }
+
+            LabeledContent("Power Mode") {
+                Text(sessionManager.powerMode.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(sessionManager.powerMode.isBatteryHeavy ? .orange : .secondary)
+            }
+
+            Text(sessionManager.powerMode.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if sessionManager.powerMode == .balanced {
+                Text("Recommended: add Smart Wake Status to the Smart Stack or a complication for the best Balanced-mode reliability.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -238,6 +254,16 @@ struct WatchRootView: View {
                 Text(autoLaunchMessage)
                     .font(.caption2)
                     .foregroundStyle(autoLaunchMessageColor)
+            }
+
+            LabeledContent("Passive HR") {
+                Text(sessionController.passiveObservationStatus)
+                    .font(.caption2)
+            }
+
+            LabeledContent("Last Passive HR") {
+                Text(sessionController.lastPassiveHeartRateSampleDescription)
+                    .font(.caption2)
             }
 
             #if DEBUG
@@ -383,10 +409,28 @@ struct WatchRootView: View {
         #if os(watchOS)
         let device = WKInterfaceDevice.current()
         switch pattern {
-        case .gentle: device.play(.click)
-        case .pulse: device.play(.start)
-        case .heartbeat: device.play(.directionUp)
-        case .alarm: device.play(.notification)
+        case .gentle:
+            device.play(.click)
+        case .pulse:
+            device.play(.start)
+        case .heartbeat:
+            device.play(.directionUp)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                WKInterfaceDevice.current().play(.click)
+            }
+        case .alarm:
+            device.play(.notification)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                WKInterfaceDevice.current().play(.retry)
+            }
+        case .critical:
+            device.play(.failure)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+                WKInterfaceDevice.current().play(.notification)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+                WKInterfaceDevice.current().play(.retry)
+            }
         }
         #endif
     }
@@ -445,8 +489,11 @@ struct WatchRootView: View {
             #if os(watchOS)
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
-                let suffix = sessionController.isProactiveWorkoutRunning ? " (HR active)" : ""
-                return "Smart Wake armed for \(formatTime(wakeUpTime))\(suffix)"
+                if sessionManager.powerMode == .highReliability {
+                    let suffix = sessionController.isProactiveWorkoutRunning ? " (overnight workout active)" : ""
+                    return "High Reliability armed for \(formatTime(wakeUpTime))\(suffix)"
+                }
+                return "Balanced mode armed for \(formatTime(wakeUpTime))"
             case .backstopActive(let wakeUpTime):
                 return "Recovered Smart Wake backstop active for \(formatTime(wakeUpTime))"
             case .needsForegroundToArm(let wakeUpTime):

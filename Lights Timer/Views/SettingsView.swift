@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(PhoneLogStore.self) private var phoneLogStore
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
+    @Environment(SmartWakeSettingsStore.self) private var smartWakeSettings
     @Environment(WatchConnectivityService.self) private var watchConnectivity
     @Environment(WatchLogArchiveService.self) private var watchLogArchive
 
@@ -14,6 +15,26 @@ struct SettingsView: View {
 
     var body: some View {
         List {
+            Section("Smart Wake") {
+                Picker("Power Mode", selection: powerModeBinding) {
+                    ForEach(SmartWakePowerMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+
+                Text(smartWakeSettings.powerMode.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(smartWakeSettings.powerMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(smartWakeSettings.powerMode.isBatteryHeavy ? .orange : .secondary)
+
+                Text("Recommended: add Smart Wake Status to your watch Smart Stack or a complication for the best Balanced-mode reliability. Exact wake still falls back if early smart wake cannot start.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             DisclosureGroup(isExpanded: $isPhoneLogsExpanded) {
                 phoneLogsContent
             } label: {
@@ -231,6 +252,13 @@ struct SettingsView: View {
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }
+
+    private var powerModeBinding: Binding<SmartWakePowerMode> {
+        Binding(
+            get: { smartWakeSettings.powerMode },
+            set: { newValue in smartWakeSettings.powerMode = newValue }
+        )
+    }
 }
 
 #Preview {
@@ -249,6 +277,7 @@ struct SettingsView: View {
         for: LightSchedule.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
+    let settingsStore = SmartWakeSettingsStore()
     let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
 
     NavigationStack {
@@ -263,9 +292,11 @@ struct SettingsView: View {
             scheduleEngine: engine,
             watchConnectivity: connectivity,
             modelContainer: container,
-            logStore: phoneLogStore
+            logStore: phoneLogStore,
+            settingsStore: settingsStore
         )
     )
+    .environment(settingsStore)
     .environment(connectivity)
     .environment(watchLogArchive)
 }

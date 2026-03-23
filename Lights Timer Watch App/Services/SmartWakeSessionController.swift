@@ -5,6 +5,13 @@ import HomeKit
 import WatchKit
 #endif
 
+#if os(watchOS)
+private struct WatchHapticBeat {
+    let delay: TimeInterval
+    let type: WKHapticType
+}
+#endif
+
 private enum WatchFallbackMode {
     case earlyRamp
     case exactWakeFinalState
@@ -35,6 +42,8 @@ final class SmartWakeSessionController: NSObject {
     private(set) var isHealthKitAuthorized: Bool = false
     private(set) var hasConfirmedHRAccess: Bool = false
     private(set) var lastHRSampleDate: Date?
+    private(set) var passiveObservationStatus = "Inactive"
+    private(set) var lastPassiveHeartRateSampleDescription = "No background sample yet"
     private(set) var isMonitoringActive = false
     private(set) var isMonitoringStartupInProgress = false
     private(set) var isWorkoutSessionRunning = false
@@ -67,12 +76,16 @@ final class SmartWakeSessionController: NSObject {
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
+    private var passiveHeartRateObserverQuery: HKObserverQuery?
     private var exactWakeTimer: Timer?
     private var seedTimeoutTimer: Timer?
     private var windowStartTimer: Timer?
     private var historicalSeedTask: Task<Void, Never>?
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
+    private var workoutRecoveryRetryTask: Task<Void, Never>?
+    private var workoutRecoveryRetryAttempts = 0
+    private var didLogWorkoutRecoveryRetryExhaustion = false
 
     private(set) var currentSchedule: WatchScheduleSnapshot?
     private var wakeUpTime: Date?
@@ -89,12 +102,19 @@ final class SmartWakeSessionController: NSObject {
     private var hapticTimer: Timer?
     private var hapticStartTime: Date?
     private var lastHapticPlayTime: Date?
-    private var heartbeatPendingSecondBeat = false
+    #if os(watchOS)
+    private var pendingFollowUpBeats: [WatchHapticBeat] = []
+    #endif
     private let hapticDuration: TimeInterval = 60
+    private let hapticTimerResolution: TimeInterval = 0.1
     private let historicalSeedLookback: TimeInterval = 7200
     private let historicalSeedTimeout: TimeInterval = 30
     private let watchLightHandoffDelay: TimeInterval = 8
+    private let workoutRecoveryRetryDelay: TimeInterval = 8
+    private let workoutRecoveryRetryValidationDelay: TimeInterval = 3
+    private let maxWorkoutRecoveryRetryAttempts = 2
     private var seenSampleUUIDs = Set<UUID>()
+    private var isPassiveObservationEnabled = false
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
@@ -104,6 +124,8 @@ final class SmartWakeSessionController: NSObject {
     var onMonitoringCancelled: (() -> Void)?
     var onHRAccessConfirmed: (() -> Void)?
     var onLogReadyToTransfer: ((URL) -> Void)?
+    var onAuthorizationChanged: (() -> Void)?
+    var onPresentationStateChanged: (() -> Void)?
 
     init(logStore: SmartWakeLogStore) {
         self.logStore = logStore
@@ -238,6 +260,7 @@ final class SmartWakeSessionController: NSObject {
                 "HEALTHKIT",
                 "Authorization complete. promptCompleted=\(isHealthKitAuthorized) hrDataAccessible=\(hasConfirmedHRAccess)"
             )
+            onAuthorizationChanged?()
             return isHealthKitAuthorized
         } catch {
             errorMessage = error.localizedDescription
@@ -248,6 +271,7 @@ final class SmartWakeSessionController: NSObject {
                 "Authorization request failed: \(error.localizedDescription)",
                 level: .error
             )
+            onAuthorizationChanged?()
             return false
         }
     }
@@ -288,12 +312,154 @@ final class SmartWakeSessionController: NSObject {
         return found
     }
 
+    func configurePassiveHeartRateObservation(enabled: Bool, reason: String) {
+        Task { @MainActor [weak self] in
+            await self?.setPassiveHeartRateObservationEnabled(enabled: enabled, reason: reason)
+        }
+    }
+
+    private func setPassiveHeartRateObservationEnabled(enabled: Bool, reason: String) async {
+        let heartRateType = HKQuantityType(.heartRate)
+
+        if !enabled {
+            if let passiveHeartRateObserverQuery {
+                healthStore.stop(passiveHeartRateObserverQuery)
+                self.passiveHeartRateObserverQuery = nil
+            }
+
+            if isPassiveObservationEnabled {
+                do {
+                    try await healthStore.disableBackgroundDelivery(for: heartRateType)
+                } catch {
+                    log(
+                        "HEALTHKIT",
+                        "Failed to disable passive heart-rate background delivery: \(error.localizedDescription)",
+                        level: .warning
+                    )
+                }
+            }
+
+            isPassiveObservationEnabled = false
+            passiveObservationStatus = reason
+            onPresentationStateChanged?()
+            return
+        }
+
+        guard isHealthKitAuthorized else {
+            passiveObservationStatus = reason
+            onPresentationStateChanged?()
+            return
+        }
+
+        if passiveHeartRateObserverQuery == nil {
+            let observerQuery = HKObserverQuery(
+                sampleType: heartRateType,
+                predicate: nil
+            ) { [weak self] _, completionHandler, error in
+                Task { @MainActor [weak self] in
+                    await self?.handlePassiveHeartRateObserverUpdate(
+                        error: error,
+                        completionHandler: completionHandler
+                    )
+                }
+            }
+            passiveHeartRateObserverQuery = observerQuery
+            healthStore.execute(observerQuery)
+        }
+
+        do {
+            try await healthStore.enableBackgroundDelivery(for: heartRateType, frequency: .hourly)
+            isPassiveObservationEnabled = true
+            passiveObservationStatus = reason
+            onPresentationStateChanged?()
+        } catch {
+            isPassiveObservationEnabled = false
+            passiveObservationStatus = "Background delivery failed"
+            log(
+                "HEALTHKIT",
+                "Failed to enable passive heart-rate background delivery: \(error.localizedDescription)",
+                level: .error
+            )
+            onPresentationStateChanged?()
+        }
+    }
+
+    private func handlePassiveHeartRateObserverUpdate(
+        error: Error?,
+        completionHandler: @escaping HKObserverQueryCompletionHandler
+    ) async {
+        guard isPassiveObservationEnabled else {
+            completionHandler()
+            return
+        }
+
+        if let error {
+            passiveObservationStatus = "Background delivery error"
+            log(
+                "HEALTHKIT",
+                "Passive heart-rate observer error: \(error.localizedDescription)",
+                level: .warning
+            )
+            onPresentationStateChanged?()
+            completionHandler()
+            return
+        }
+
+        do {
+            if let sample = try await fetchLatestHeartRateSample() {
+                let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+                let bpm = sample.quantity.doubleValue(for: bpmUnit)
+                lastPassiveHeartRateSampleDescription = "\(formatBPM(bpm)) BPM at \(formatTimestamp(sample.startDate))"
+                passiveObservationStatus = "Hourly background delivery active"
+
+                if !hasConfirmedHRAccess {
+                    hasConfirmedHRAccess = true
+                    log("HEALTHKIT", "HR access confirmed via passive background delivery")
+                    onHRAccessConfirmed?()
+                }
+                onPresentationStateChanged?()
+            }
+        } catch {
+            passiveObservationStatus = "Background fetch failed"
+            log(
+                "HEALTHKIT",
+                "Passive background heart-rate fetch failed: \(error.localizedDescription)",
+                level: .warning
+            )
+            onPresentationStateChanged?()
+        }
+
+        completionHandler()
+    }
+
+    private func fetchLatestHeartRateSample() async throws -> HKQuantitySample? {
+        try await withCheckedThrowingContinuation { continuation in
+            let sampleType = HKQuantityType(.heartRate)
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let query = HKSampleQuery(
+                sampleType: sampleType,
+                predicate: nil,
+                limit: 1,
+                sortDescriptors: [sort]
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    let sample = (samples as? [HKQuantitySample])?.first
+                    continuation.resume(returning: sample)
+                }
+            }
+            healthStore.execute(query)
+        }
+    }
+
     // MARK: - Scheduling Diagnostics
 
     func updateNextScheduledWakeWindow(schedule: WatchScheduleSnapshot?, wakeUpTime: Date?) {
         guard let schedule, let wakeUpTime else {
             nextScheduledWakeWindowDescription = nil
             log("SCHEDULER", "Cleared next scheduled wake window")
+            onPresentationStateChanged?()
             return
         }
 
@@ -306,6 +472,7 @@ final class SmartWakeSessionController: NSObject {
             "SCHEDULER",
             "Updated next wake window for '\(schedule.name)' to \(formatTimestamp(windowStart)) -> \(formatTimestamp(wakeUpTime))"
         )
+        onPresentationStateChanged?()
     }
 
     // MARK: - Session Lifecycle
@@ -339,6 +506,7 @@ final class SmartWakeSessionController: NSObject {
         currentScheduleID = schedule.id
         self.wakeUpTime = wakeUpTime
         self.windowStartTime = windowStartTime
+        resetWorkoutRecoveryRetryState()
         lastHRSampleDate = nil
         didLogWakeWindowStart = false
         heuristicEngine.configure(wakeWindowStart: windowStartTime)
@@ -388,6 +556,9 @@ final class SmartWakeSessionController: NSObject {
                             level: .warning
                         )
                         startDegradedMonitoring()
+                        scheduleWorkoutRecoveryRetryIfNeeded(
+                            reason: "workout session ended during monitoring startup"
+                        )
                         return
                     }
 
@@ -410,6 +581,9 @@ final class SmartWakeSessionController: NSObject {
                         level: .warning
                     )
                     startDegradedMonitoring()
+                    scheduleWorkoutRecoveryRetryIfNeeded(
+                        reason: "workout session ended during monitoring startup"
+                    )
                     return
                 }
 
@@ -432,6 +606,9 @@ final class SmartWakeSessionController: NSObject {
                 level: .warning
             )
             startDegradedMonitoring()
+            scheduleWorkoutRecoveryRetryIfNeeded(
+                reason: "workout startup threw \(error.localizedDescription)"
+            )
         }
     }
 
@@ -574,6 +751,7 @@ final class SmartWakeSessionController: NSObject {
         seenSampleUUIDs.removeAll()
         lastHRSampleDate = nil
         isMonitoringStartupInProgress = false
+        resetWorkoutRecoveryRetryState()
     }
 
     // MARK: - Handoff
@@ -659,7 +837,7 @@ final class SmartWakeSessionController: NSObject {
         try await builder.beginCollection(at: Date())
         isProactiveWorkoutRunning = false
         isWorkoutSessionRunning = true
-        log("HEALTHKIT", "Workout session started and live collection began")
+        log("HEALTHKIT", "Workout session start request completed; awaiting running state")
     }
 
     private func endWorkoutSession() async {
@@ -794,6 +972,186 @@ final class SmartWakeSessionController: NSObject {
         workoutSession != nil && isWorkoutSessionRunning
     }
 
+    private func resetWorkoutRecoveryRetryState() {
+        workoutRecoveryRetryTask?.cancel()
+        workoutRecoveryRetryTask = nil
+        workoutRecoveryRetryAttempts = 0
+        didLogWorkoutRecoveryRetryExhaustion = false
+    }
+
+    private func scheduleWorkoutRecoveryRetryIfNeeded(reason: String) {
+        guard isMonitoringActive, isDegradedMode, sessionState == .monitoring else { return }
+        guard activeTriggerID == nil else { return }
+        guard workoutRecoveryRetryTask == nil else { return }
+        guard let wakeUpTime else { return }
+
+        let timeRemaining = wakeUpTime.timeIntervalSinceNow
+        guard timeRemaining > 1 else {
+            if !didLogWorkoutRecoveryRetryExhaustion {
+                didLogWorkoutRecoveryRetryExhaustion = true
+                log(
+                    "SESSION",
+                    "Skipping workout recovery retry because wake time is imminent",
+                    level: .warning
+                )
+            }
+            return
+        }
+
+        guard workoutRecoveryRetryAttempts < maxWorkoutRecoveryRetryAttempts else {
+            if !didLogWorkoutRecoveryRetryExhaustion {
+                didLogWorkoutRecoveryRetryExhaustion = true
+                log(
+                    "SESSION",
+                    "Workout recovery retry budget exhausted; remaining in degraded mode until wake time",
+                    level: .warning
+                )
+            }
+            return
+        }
+
+        let attempt = workoutRecoveryRetryAttempts + 1
+        workoutRecoveryRetryAttempts = attempt
+        let delay = min(workoutRecoveryRetryDelay, timeRemaining - 1)
+
+        log(
+            "SESSION",
+            "Scheduling workout recovery retry \(attempt)/\(maxWorkoutRecoveryRetryAttempts) in \(formatInterval(delay)) (\(reason))",
+            level: .warning
+        )
+
+        workoutRecoveryRetryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                self.workoutRecoveryRetryTask = nil
+                return
+            }
+
+            guard self.isMonitoringActive,
+                  self.isDegradedMode,
+                  self.sessionState == .monitoring,
+                  self.activeTriggerID == nil,
+                  let wakeUpTime = self.wakeUpTime,
+                  Date() < wakeUpTime else {
+                self.workoutRecoveryRetryTask = nil
+                return
+            }
+
+            self.clearWorkoutSessionReference(
+                reason: "Clearing failed workout state before recovery retry \(attempt)",
+                level: .warning
+            )
+            self.log(
+                "SESSION",
+                "Retrying workout startup while degraded monitoring is active (attempt \(attempt)/\(self.maxWorkoutRecoveryRetryAttempts))",
+                level: .warning
+            )
+
+            do {
+                try await self.startWorkoutSession()
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) start request completed; waiting \(self.formatInterval(self.workoutRecoveryRetryValidationDelay)) for a stable running state"
+                )
+            } catch {
+                self.workoutRecoveryRetryTask = nil
+                self.clearWorkoutSessionReference(
+                    reason: "Clearing workout state after recovery retry \(attempt) failed",
+                    level: .warning
+                )
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) failed: \(error.localizedDescription)",
+                    level: .warning
+                )
+                self.scheduleWorkoutRecoveryRetryIfNeeded(reason: "retry \(attempt) failed")
+                return
+            }
+
+            do {
+                try await Task.sleep(for: .seconds(self.workoutRecoveryRetryValidationDelay))
+            } catch {
+                self.workoutRecoveryRetryTask = nil
+                return
+            }
+
+            self.workoutRecoveryRetryTask = nil
+
+            guard self.isMonitoringActive, self.sessionState == .monitoring else { return }
+
+            if self.isDegradedMode {
+                self.clearWorkoutSessionReference(
+                    reason: "Clearing workout state after recovery retry \(attempt) did not stabilize",
+                    level: .warning
+                )
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) did not recover live workout execution",
+                    level: .warning
+                )
+                self.scheduleWorkoutRecoveryRetryIfNeeded(reason: "retry \(attempt) did not stabilize")
+            } else {
+                self.log(
+                    "SESSION",
+                    "Workout recovery retry \(attempt) stabilized; full monitoring resumed"
+                )
+            }
+        }
+    }
+
+    func attemptForegroundWorkoutRecoveryIfNeeded(reason: String) {
+        guard isMonitoringActive, isDegradedMode, sessionState == .monitoring else { return }
+        guard activeTriggerID == nil else { return }
+        guard let wakeUpTime, Date() < wakeUpTime else { return }
+
+        if workoutRecoveryRetryTask != nil {
+            log(
+                "SESSION",
+                "Cancelling delayed workout recovery retry in favor of immediate foreground attempt (\(reason))",
+                level: .warning
+            )
+        }
+        workoutRecoveryRetryTask?.cancel()
+        workoutRecoveryRetryTask = nil
+
+        clearWorkoutSessionReference(
+            reason: "Clearing degraded workout state before foreground recovery attempt",
+            level: .warning
+        )
+        log(
+            "SESSION",
+            "Attempting immediate workout recovery from foreground (\(reason))",
+            level: .warning
+        )
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.startWorkoutSession()
+                self.log(
+                    "SESSION",
+                    "Foreground workout recovery start request completed; awaiting running state"
+                )
+            } catch {
+                self.clearWorkoutSessionReference(
+                    reason: "Clearing workout state after foreground recovery failure",
+                    level: .warning
+                )
+                self.log(
+                    "SESSION",
+                    "Foreground workout recovery failed: \(error.localizedDescription)",
+                    level: .warning
+                )
+                self.scheduleWorkoutRecoveryRetryIfNeeded(
+                    reason: "foreground recovery failed"
+                )
+            }
+        }
+    }
+
     private func beginMonitoringDataFlow(
         wakeUpTime: Date,
         windowStartTime: Date
@@ -808,7 +1166,7 @@ final class SmartWakeSessionController: NSObject {
         checkForWakeTrigger()
         startHistoricalSeed(
             from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
-            to: Date()
+            to: historicalSeedEndDate(windowStartTime: windowStartTime)
         )
     }
 
@@ -832,7 +1190,7 @@ final class SmartWakeSessionController: NSObject {
         if let windowStartTime {
             startHistoricalSeed(
                 from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
-                to: Date()
+                to: historicalSeedEndDate(windowStartTime: windowStartTime)
             )
         }
 
@@ -840,6 +1198,10 @@ final class SmartWakeSessionController: NSObject {
     }
 
     // MARK: - Heart Rate Query
+
+    private func historicalSeedEndDate(windowStartTime: Date) -> Date {
+        min(Date(), windowStartTime)
+    }
 
     private func startHistoricalSeed(from startDate: Date, to endDate: Date) {
         historicalSeedTask?.cancel()
@@ -1237,6 +1599,7 @@ final class SmartWakeSessionController: NSObject {
             message: errorMessage
         )
         onStateChange?(state)
+        onPresentationStateChanged?()
     }
 
     // MARK: - Test Haptics
@@ -1769,12 +2132,13 @@ final class SmartWakeSessionController: NSObject {
         stopHaptics()
         hapticStartTime = Date()
         lastHapticPlayTime = nil
-        heartbeatPendingSecondBeat = false
+        pendingFollowUpBeats = []
 
-        playHapticForPattern(hapticPatternType, isSecondBeat: false)
+        playHaptic(primaryHapticType(for: hapticPatternType))
         lastHapticPlayTime = Date()
+        pendingFollowUpBeats = followUpBeats(for: hapticPatternType)
 
-        hapticTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+        hapticTimer = Timer.scheduledTimer(withTimeInterval: hapticTimerResolution, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.hapticTimerTick()
             }
@@ -1792,7 +2156,9 @@ final class SmartWakeSessionController: NSObject {
         hapticTimer = nil
         hapticStartTime = nil
         lastHapticPlayTime = nil
-        heartbeatPendingSecondBeat = false
+        #if os(watchOS)
+        pendingFollowUpBeats = []
+        #endif
         log("HAPTICS", "Haptic playback stopped")
     }
 
@@ -1802,9 +2168,9 @@ final class SmartWakeSessionController: NSObject {
 
         let elapsed = Date().timeIntervalSince(startTime)
         if elapsed >= hapticDuration {
-            WKInterfaceDevice.current().play(.notification)
+            playHaptic(finalHapticType(for: hapticPatternType))
             stopHaptics()
-            log("HAPTICS", "Haptic ramp reached completion and played final notification")
+            log("HAPTICS", "Haptic ramp reached completion and played final completion haptic")
             return
         }
 
@@ -1812,35 +2178,53 @@ final class SmartWakeSessionController: NSObject {
         let interval = nextInterval(for: hapticPatternType, progress: progress)
         let timeSinceLastPlay = lastHapticPlayTime.map { Date().timeIntervalSince($0) } ?? .infinity
 
-        if hapticPatternType == .heartbeat && heartbeatPendingSecondBeat && timeSinceLastPlay >= 0.3 {
-            WKInterfaceDevice.current().play(.click)
-            heartbeatPendingSecondBeat = false
+        if let followUpBeat = pendingFollowUpBeats.first, timeSinceLastPlay >= followUpBeat.delay {
+            playHaptic(followUpBeat.type)
+            pendingFollowUpBeats.removeFirst()
             lastHapticPlayTime = Date()
             return
         }
 
+        guard pendingFollowUpBeats.isEmpty else { return }
         guard timeSinceLastPlay >= interval else { return }
 
-        playHapticForPattern(hapticPatternType, isSecondBeat: false)
+        playHaptic(primaryHapticType(for: hapticPatternType))
         lastHapticPlayTime = Date()
+        pendingFollowUpBeats = followUpBeats(for: hapticPatternType)
+    }
 
-        if hapticPatternType == .heartbeat {
-            heartbeatPendingSecondBeat = true
+    private func playHaptic(_ type: WKHapticType) {
+        WKInterfaceDevice.current().play(type)
+    }
+
+    private func primaryHapticType(for pattern: HapticPattern) -> WKHapticType {
+        switch pattern {
+        case .gentle:
+            .click
+        case .pulse:
+            .start
+        case .heartbeat:
+            .directionUp
+        case .alarm:
+            .notification
+        case .critical:
+            .failure
         }
     }
 
-    private func playHapticForPattern(_ pattern: HapticPattern, isSecondBeat: Bool) {
-        let device = WKInterfaceDevice.current()
-
+    private func followUpBeats(for pattern: HapticPattern) -> [WatchHapticBeat] {
         switch pattern {
-        case .gentle:
-            device.play(.click)
-        case .pulse:
-            device.play(.start)
+        case .gentle, .pulse:
+            []
         case .heartbeat:
-            device.play(isSecondBeat ? .click : .directionUp)
+            [WatchHapticBeat(delay: 0.3, type: .click)]
         case .alarm:
-            device.play(.notification)
+            [WatchHapticBeat(delay: 0.25, type: .retry)]
+        case .critical:
+            [
+                WatchHapticBeat(delay: 0.16, type: .notification),
+                WatchHapticBeat(delay: 0.18, type: .retry)
+            ]
         }
     }
 
@@ -1853,7 +2237,18 @@ final class SmartWakeSessionController: NSObject {
         case .heartbeat:
             return 4.0 - 2.5 * progress
         case .alarm:
-            return 2.0 - 1.3 * progress
+            return 0.9 - 0.55 * progress
+        case .critical:
+            return 0.6 - 0.35 * progress
+        }
+    }
+
+    private func finalHapticType(for pattern: HapticPattern) -> WKHapticType {
+        switch pattern {
+        case .critical:
+            .failure
+        case .gentle, .pulse, .heartbeat, .alarm:
+            .notification
         }
     }
     #endif
@@ -1879,6 +2274,22 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                     "Ignoring state change from stale workout session",
                     level: .warning
                 )
+                return
+            }
+            if toState == .running {
+                self.isWorkoutSessionRunning = true
+                if self.isMonitoringActive && self.isDegradedMode {
+                    self.isDegradedMode = false
+                    self.log(
+                        "SESSION",
+                        "Workout session entered running state during degraded monitoring — resuming full monitoring"
+                    )
+                } else if self.isMonitoringStartupInProgress {
+                    self.log(
+                        "SESSION",
+                        "Workout session entered running state during monitoring startup"
+                    )
+                }
                 return
             }
             if toState == .ended {
@@ -1925,6 +2336,9 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                     self.isDegradedMode = true
                     // Keep monitoring alive — sample-driven checks and the
                     // exact-wake/window/seed timers remain active.
+                    self.scheduleWorkoutRecoveryRetryIfNeeded(
+                        reason: "workout session ended during monitoring"
+                    )
                 }
             }
         }
@@ -1990,6 +2404,9 @@ extension SmartWakeSessionController: HKWorkoutSessionDelegate {
                     level: .warning
                 )
                 self.isDegradedMode = true
+                self.scheduleWorkoutRecoveryRetryIfNeeded(
+                    reason: "workout session failed during monitoring"
+                )
             }
         }
     }

@@ -10,6 +10,7 @@ struct Lights_TimerApp: App {
     @State private var scheduleEngine: ScheduleEngine
     @State private var watchConnectivity: WatchConnectivityService
     @State private var smartWakeCoordinator: SmartWakeCoordinator
+    @State private var smartWakeSettings: SmartWakeSettingsStore
     @State private var healthKitAuth: HealthKitAuthorizationService
     @State private var watchLogArchive: WatchLogArchiveService
 
@@ -25,13 +26,15 @@ struct Lights_TimerApp: App {
             lightController: controller,
             logStore: phoneLogStore
         )
+        let smartWakeSettings = SmartWakeSettingsStore()
         let connectivity = WatchConnectivityService(logStore: phoneLogStore)
         let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
         let coordinator = SmartWakeCoordinator(
             scheduleEngine: engine,
             watchConnectivity: connectivity,
             modelContainer: container,
-            logStore: phoneLogStore
+            logStore: phoneLogStore,
+            settingsStore: smartWakeSettings
         )
         let healthKitAuth = HealthKitAuthorizationService(logStore: phoneLogStore)
 
@@ -49,11 +52,19 @@ struct Lights_TimerApp: App {
         _scheduleEngine = State(initialValue: engine)
         _watchConnectivity = State(initialValue: connectivity)
         _smartWakeCoordinator = State(initialValue: coordinator)
+        _smartWakeSettings = State(initialValue: smartWakeSettings)
         _healthKitAuth = State(initialValue: healthKitAuth)
         _watchLogArchive = State(initialValue: watchLogArchive)
 
         connectivity.onWatchLogFileReceived = { [weak watchLogArchive] fileURL, metadata in
             watchLogArchive?.importTransferredLog(from: fileURL, metadata: metadata)
+        }
+
+        smartWakeSettings.onPowerModeChanged = { [weak coordinator] powerMode in
+            phoneLogStore.log("APP", "Smart Wake power mode changed to \(powerMode.rawValue)")
+            guard let coordinator else { return }
+            let context = ModelContext(container)
+            coordinator.syncSchedulesToWatch(modelContext: context)
         }
 
         phoneLogStore.log("APP", "Lights Timer iPhone app initialized")
@@ -67,6 +78,7 @@ struct Lights_TimerApp: App {
                 .environment(scheduleEngine)
                 .environment(watchConnectivity)
                 .environment(smartWakeCoordinator)
+                .environment(smartWakeSettings)
                 .environment(healthKitAuth)
                 .environment(watchLogArchive)
         }
