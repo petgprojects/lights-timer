@@ -1,6 +1,7 @@
 {
   "images" : [
     {
+      "filename" : "lights-timer-icon.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

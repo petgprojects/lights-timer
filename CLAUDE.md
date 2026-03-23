@@ -281,6 +281,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 ### Test Mode
 - **iPhone "Test Lights"** (swipe right on any schedule row): `ScheduleEngine.startTestExecution(for:)` runs the full light ramp from now to now + leadTimeMinutes. A "Stop" button appears in the running banner.
 - **Watch "Test Alarm"** (button per schedule in WatchRootView): plays the 60-second haptic ramp locally, starts the watch-local HomeKit ramp, and sends a `testTrigger` message to the phone. The phone starts a rapid smart-wake-style light ramp only if the watch did not already claim the lights.
+- `HapticPattern.alarm` now uses denser notification/retry burst pairs than the other presets so it is the most aggressive watch-side wake pattern.
 - **Haptic preview**: selecting a haptic pattern plays a preview vibration on both platforms (iOS: UIKit feedback generators; watchOS: `WKInterfaceDevice.play()`).
 - **Watch debug-only "No-Builder Validation"** (`#if DEBUG`, Diagnostics section): starts a bare `HKWorkoutSession` with no `HKLiveWorkoutBuilder`, runs the anchored HR query from the start time, logs per-sample cadence to the watch runtime log, exposes a manual 2-hour seed-query probe while the session is active, and stops cleanly without entering the Smart Wake monitoring workflow.
 

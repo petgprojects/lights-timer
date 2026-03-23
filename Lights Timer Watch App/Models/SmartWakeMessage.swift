@@ -146,7 +146,7 @@ enum HapticPattern: String, Codable, CaseIterable, Identifiable {
         case .gentle: "Soft taps that gradually increase"
         case .pulse: "Rhythmic pulses that build"
         case .heartbeat: "Heartbeat-like double taps"
-        case .alarm: "Strong, urgent tapping"
+        case .alarm: "Aggressive alarm bursts with rapid follow-up taps"
         }
     }
 
