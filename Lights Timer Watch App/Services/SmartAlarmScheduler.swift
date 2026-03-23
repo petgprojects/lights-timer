@@ -40,7 +40,11 @@ final class SmartAlarmScheduler: NSObject {
     private(set) var isAlarmSessionActive = false
     private(set) var scheduledMonitoringDate: Date?
     private(set) var alarmSessionError: String?
-    private(set) var armingState: SmartWakeArmingState = .noUpcomingWake
+    private(set) var armingState: SmartWakeArmingState = .noUpcomingWake {
+        didSet {
+            onStatusChanged?()
+        }
+    }
     private(set) var autoLaunchState: SmartWakeAutoLaunchState
     private(set) var isSceneActive = false
 
@@ -70,6 +74,8 @@ final class SmartAlarmScheduler: NSObject {
     private let sessionSetupBuffer: TimeInterval = 120
     private let armingHorizon: TimeInterval = 35 * 3600
     private let maxProactiveLeadTime: TimeInterval = 10 * 3600
+
+    var onStatusChanged: (() -> Void)?
 
     init(
         sessionController: SmartWakeSessionController,
@@ -644,15 +650,22 @@ final class SmartAlarmScheduler: NSObject {
             "Scheduled extended runtime session for '\(schedule.name)' at \(formatTimestamp(date)). monitoringStart=\(formatTimestamp(baselineStart))"
         )
 
-        let now = Date()
-        if wake.baselineStart.timeIntervalSince(now) <= maxProactiveLeadTime {
-            maybeStartProactiveWorkout(
-                for: wake,
-                now: now,
-                reason: "Starting proactive workout immediately after arming"
-            )
+        if sessionManager.powerMode == .highReliability {
+            let now = Date()
+            if wake.baselineStart.timeIntervalSince(now) <= maxProactiveLeadTime {
+                maybeStartProactiveWorkout(
+                    for: wake,
+                    now: now,
+                    reason: "Starting proactive workout immediately after arming"
+                )
+            } else {
+                logDeferredProactiveWorkout(for: wake, now: now)
+            }
         } else {
-            logDeferredProactiveWorkout(for: wake, now: now)
+            logStore.log(
+                "SCHEDULER",
+                "Balanced mode armed for '\(schedule.name)' — skipping overnight proactive workout"
+            )
         }
     }
 
@@ -838,6 +851,7 @@ final class SmartAlarmScheduler: NSObject {
         now: Date,
         reason: String
     ) {
+        guard sessionManager.powerMode == .highReliability else { return }
         guard isSceneActive else { return }
         guard !sessionController.isMonitoringActive,
               !sessionController.isMonitoringStartupInProgress,
@@ -854,6 +868,7 @@ final class SmartAlarmScheduler: NSObject {
     }
 
     private func logDeferredProactiveWorkout(for wake: PendingWake, now: Date) {
+        guard sessionManager.powerMode == .highReliability else { return }
         let timeUntilMonitoring = wake.baselineStart.timeIntervalSince(now)
         guard timeUntilMonitoring > maxProactiveLeadTime else { return }
 

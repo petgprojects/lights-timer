@@ -42,9 +42,11 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
 
     // MARK: - Send to Watch
 
-    func sendSchedules(_ snapshots: [WatchScheduleSnapshot]) {
+    func sendSchedules(_ snapshots: [WatchScheduleSnapshot], powerMode: SmartWakePowerMode) {
         do {
-            let data = try JSONEncoder().encode(snapshots)
+            let data = try JSONEncoder().encode(
+                SmartWakeSyncPayload(schedules: snapshots, powerMode: powerMode)
+            )
             cachedSchedulesContext = [
                 WCMessageKey.type: WCMessageKey.schedulesUpdated,
                 WCMessageKey.payload: data
@@ -94,7 +96,11 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
         do {
             try session.updateApplicationContext(context)
             lastSuccessfullySentSchedulesPayload = payload
-            if let schedules = try? JSONDecoder().decode([WatchScheduleSnapshot].self, from: payload) {
+            if let syncPayload = try? JSONDecoder().decode(SmartWakeSyncPayload.self, from: payload) {
+                log(
+                    "Sent \(syncPayload.schedules.count) schedule(s) to watch with powerMode=\(syncPayload.powerMode.rawValue)"
+                )
+            } else if let schedules = try? JSONDecoder().decode([WatchScheduleSnapshot].self, from: payload) {
                 log("Sent \(schedules.count) schedule(s) to watch")
             } else {
                 log("Sent schedules to watch")

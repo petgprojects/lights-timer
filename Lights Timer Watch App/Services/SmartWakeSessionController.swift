@@ -35,6 +35,8 @@ final class SmartWakeSessionController: NSObject {
     private(set) var isHealthKitAuthorized: Bool = false
     private(set) var hasConfirmedHRAccess: Bool = false
     private(set) var lastHRSampleDate: Date?
+    private(set) var passiveObservationStatus = "Inactive"
+    private(set) var lastPassiveHeartRateSampleDescription = "No background sample yet"
     private(set) var isMonitoringActive = false
     private(set) var isMonitoringStartupInProgress = false
     private(set) var isWorkoutSessionRunning = false
@@ -67,6 +69,7 @@ final class SmartWakeSessionController: NSObject {
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
+    private var passiveHeartRateObserverQuery: HKObserverQuery?
     private var exactWakeTimer: Timer?
     private var seedTimeoutTimer: Timer?
     private var windowStartTimer: Timer?
@@ -95,6 +98,7 @@ final class SmartWakeSessionController: NSObject {
     private let historicalSeedTimeout: TimeInterval = 30
     private let watchLightHandoffDelay: TimeInterval = 8
     private var seenSampleUUIDs = Set<UUID>()
+    private var isPassiveObservationEnabled = false
 
     var onTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onStateChange: ((SmartWakeSessionState) -> Void)?
@@ -104,6 +108,8 @@ final class SmartWakeSessionController: NSObject {
     var onMonitoringCancelled: (() -> Void)?
     var onHRAccessConfirmed: (() -> Void)?
     var onLogReadyToTransfer: ((URL) -> Void)?
+    var onAuthorizationChanged: (() -> Void)?
+    var onPresentationStateChanged: (() -> Void)?
 
     init(logStore: SmartWakeLogStore) {
         self.logStore = logStore
@@ -238,6 +244,7 @@ final class SmartWakeSessionController: NSObject {
                 "HEALTHKIT",
                 "Authorization complete. promptCompleted=\(isHealthKitAuthorized) hrDataAccessible=\(hasConfirmedHRAccess)"
             )
+            onAuthorizationChanged?()
             return isHealthKitAuthorized
         } catch {
             errorMessage = error.localizedDescription
@@ -248,6 +255,7 @@ final class SmartWakeSessionController: NSObject {
                 "Authorization request failed: \(error.localizedDescription)",
                 level: .error
             )
+            onAuthorizationChanged?()
             return false
         }
     }
@@ -288,12 +296,154 @@ final class SmartWakeSessionController: NSObject {
         return found
     }
 
+    func configurePassiveHeartRateObservation(enabled: Bool, reason: String) {
+        Task { @MainActor [weak self] in
+            await self?.setPassiveHeartRateObservationEnabled(enabled: enabled, reason: reason)
+        }
+    }
+
+    private func setPassiveHeartRateObservationEnabled(enabled: Bool, reason: String) async {
+        let heartRateType = HKQuantityType(.heartRate)
+
+        if !enabled {
+            if let passiveHeartRateObserverQuery {
+                healthStore.stop(passiveHeartRateObserverQuery)
+                self.passiveHeartRateObserverQuery = nil
+            }
+
+            if isPassiveObservationEnabled {
+                do {
+                    try await healthStore.disableBackgroundDelivery(for: heartRateType)
+                } catch {
+                    log(
+                        "HEALTHKIT",
+                        "Failed to disable passive heart-rate background delivery: \(error.localizedDescription)",
+                        level: .warning
+                    )
+                }
+            }
+
+            isPassiveObservationEnabled = false
+            passiveObservationStatus = reason
+            onPresentationStateChanged?()
+            return
+        }
+
+        guard isHealthKitAuthorized else {
+            passiveObservationStatus = reason
+            onPresentationStateChanged?()
+            return
+        }
+
+        if passiveHeartRateObserverQuery == nil {
+            let observerQuery = HKObserverQuery(
+                sampleType: heartRateType,
+                predicate: nil
+            ) { [weak self] _, completionHandler, error in
+                Task { @MainActor [weak self] in
+                    await self?.handlePassiveHeartRateObserverUpdate(
+                        error: error,
+                        completionHandler: completionHandler
+                    )
+                }
+            }
+            passiveHeartRateObserverQuery = observerQuery
+            healthStore.execute(observerQuery)
+        }
+
+        do {
+            try await healthStore.enableBackgroundDelivery(for: heartRateType, frequency: .hourly)
+            isPassiveObservationEnabled = true
+            passiveObservationStatus = reason
+            onPresentationStateChanged?()
+        } catch {
+            isPassiveObservationEnabled = false
+            passiveObservationStatus = "Background delivery failed"
+            log(
+                "HEALTHKIT",
+                "Failed to enable passive heart-rate background delivery: \(error.localizedDescription)",
+                level: .error
+            )
+            onPresentationStateChanged?()
+        }
+    }
+
+    private func handlePassiveHeartRateObserverUpdate(
+        error: Error?,
+        completionHandler: @escaping HKObserverQueryCompletionHandler
+    ) async {
+        guard isPassiveObservationEnabled else {
+            completionHandler()
+            return
+        }
+
+        if let error {
+            passiveObservationStatus = "Background delivery error"
+            log(
+                "HEALTHKIT",
+                "Passive heart-rate observer error: \(error.localizedDescription)",
+                level: .warning
+            )
+            onPresentationStateChanged?()
+            completionHandler()
+            return
+        }
+
+        do {
+            if let sample = try await fetchLatestHeartRateSample() {
+                let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+                let bpm = sample.quantity.doubleValue(for: bpmUnit)
+                lastPassiveHeartRateSampleDescription = "\(formatBPM(bpm)) BPM at \(formatTimestamp(sample.startDate))"
+                passiveObservationStatus = "Hourly background delivery active"
+
+                if !hasConfirmedHRAccess {
+                    hasConfirmedHRAccess = true
+                    log("HEALTHKIT", "HR access confirmed via passive background delivery")
+                    onHRAccessConfirmed?()
+                }
+                onPresentationStateChanged?()
+            }
+        } catch {
+            passiveObservationStatus = "Background fetch failed"
+            log(
+                "HEALTHKIT",
+                "Passive background heart-rate fetch failed: \(error.localizedDescription)",
+                level: .warning
+            )
+            onPresentationStateChanged?()
+        }
+
+        completionHandler()
+    }
+
+    private func fetchLatestHeartRateSample() async throws -> HKQuantitySample? {
+        try await withCheckedThrowingContinuation { continuation in
+            let sampleType = HKQuantityType(.heartRate)
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let query = HKSampleQuery(
+                sampleType: sampleType,
+                predicate: nil,
+                limit: 1,
+                sortDescriptors: [sort]
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    let sample = (samples as? [HKQuantitySample])?.first
+                    continuation.resume(returning: sample)
+                }
+            }
+            healthStore.execute(query)
+        }
+    }
+
     // MARK: - Scheduling Diagnostics
 
     func updateNextScheduledWakeWindow(schedule: WatchScheduleSnapshot?, wakeUpTime: Date?) {
         guard let schedule, let wakeUpTime else {
             nextScheduledWakeWindowDescription = nil
             log("SCHEDULER", "Cleared next scheduled wake window")
+            onPresentationStateChanged?()
             return
         }
 
@@ -306,6 +456,7 @@ final class SmartWakeSessionController: NSObject {
             "SCHEDULER",
             "Updated next wake window for '\(schedule.name)' to \(formatTimestamp(windowStart)) -> \(formatTimestamp(wakeUpTime))"
         )
+        onPresentationStateChanged?()
     }
 
     // MARK: - Session Lifecycle
@@ -1237,6 +1388,7 @@ final class SmartWakeSessionController: NSObject {
             message: errorMessage
         )
         onStateChange?(state)
+        onPresentationStateChanged?()
     }
 
     // MARK: - Test Haptics

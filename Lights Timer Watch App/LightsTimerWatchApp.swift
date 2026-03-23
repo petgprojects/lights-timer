@@ -29,6 +29,7 @@ struct LightsTimerWatchApp: App {
                         "APP",
                         "Watch app task initialized. promptCompleted=\(services.sessionController.isHealthKitAuthorized) hrDataAccessible=\(services.sessionController.hasConfirmedHRAccess)"
                     )
+                    services.refreshDerivedSmartWakeState()
 
                     #if os(watchOS)
                     services.alarmScheduler.refreshAutoLaunchAuthorization(
@@ -56,6 +57,7 @@ struct LightsTimerWatchApp: App {
                         promptIfEligible: shouldPromptAutoLaunchAuthorization(for: schedules)
                     )
                     services.alarmScheduler.schedulesDidUpdate(schedules)
+                    services.refreshDerivedSmartWakeState()
                     #endif
                 }
                 .onChange(of: scenePhase) { _, newPhase in
@@ -69,6 +71,7 @@ struct LightsTimerWatchApp: App {
                     } else {
                         services.alarmScheduler.onAppBackground()
                     }
+                    services.refreshDerivedSmartWakeState()
                 }
                 #endif
         }

@@ -63,6 +63,54 @@ struct HapticPatternChangePayload: Codable {
     let hapticPatternRaw: String
 }
 
+enum SmartWakePowerMode: String, Codable, CaseIterable, Identifiable {
+    case balanced
+    case highReliability
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .balanced:
+            "Balanced"
+        case .highReliability:
+            "High Reliability"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .balanced:
+            "Starts the workout only near wake for lower overnight battery use."
+        case .highReliability:
+            "Starts an overnight workout session to maximize early Smart Wake reliability."
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .balanced:
+            "Recommended. Smart Wake is best-effort before exact wake, with lower battery use. Add the watch widget for better background delivery."
+        case .highReliability:
+            "Highest chance of an early Smart Wake trigger, with significantly higher overnight battery use."
+        }
+    }
+
+    var isBatteryHeavy: Bool {
+        switch self {
+        case .balanced:
+            false
+        case .highReliability:
+            true
+        }
+    }
+}
+
+struct SmartWakeSyncPayload: Codable, Equatable {
+    let schedules: [WatchScheduleSnapshot]
+    let powerMode: SmartWakePowerMode
+}
+
 enum WCMessageKey {
     static let type = "type"
     static let payload = "payload"
