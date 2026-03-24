@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
     @Environment(SmartWakeSettingsStore.self) private var smartWakeSettings
+    @Environment(SmartWakeCalibrationService.self) private var smartWakeCalibration
     @Environment(WatchConnectivityService.self) private var watchConnectivity
     @Environment(WatchLogArchiveService.self) private var watchLogArchive
 
@@ -31,6 +32,18 @@ struct SettingsView: View {
                     .foregroundStyle(smartWakeSettings.powerMode.isBatteryHeavy ? .orange : .secondary)
 
                 Text("Recommended: add Smart Wake Status to your watch Smart Stack or a complication for the best Balanced-mode reliability. Exact wake still falls back if early smart wake cannot start.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if !smartWakeCalibration.isAuthorized {
+                    Button("Grant Calibration Health Access") {
+                        Task {
+                            _ = await smartWakeCalibration.requestAuthorization()
+                        }
+                    }
+                }
+
+                Text(smartWakeCalibration.statusMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -278,6 +291,7 @@ struct SettingsView: View {
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     let settingsStore = SmartWakeSettingsStore()
+    let calibrationService = SmartWakeCalibrationService(logStore: phoneLogStore)
     let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
 
     NavigationStack {
@@ -293,10 +307,12 @@ struct SettingsView: View {
             watchConnectivity: connectivity,
             modelContainer: container,
             logStore: phoneLogStore,
-            settingsStore: settingsStore
+            settingsStore: settingsStore,
+            calibrationService: calibrationService
         )
     )
     .environment(settingsStore)
+    .environment(calibrationService)
     .environment(connectivity)
     .environment(watchLogArchive)
 }

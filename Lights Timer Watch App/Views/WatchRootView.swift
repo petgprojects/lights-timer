@@ -125,9 +125,7 @@ struct WatchRootView: View {
                 Button("Grant Health Access") {
                     Task {
                         _ = await sessionController.requestAuthorization()
-                        sessionManager.sendHeartRateStatus(
-                            active: sessionController.hasConfirmedHRAccess
-                        )
+                        sessionManager.sendPermissionStatus(sessionController.motionStatusPayload)
                         #if os(watchOS)
                         alarmScheduler.onAppForeground()
                         #endif
@@ -232,7 +230,7 @@ struct WatchRootView: View {
     private var diagnosticsOverviewSection: some View {
         Section("Diagnostics") {
             if sessionController.sessionState == .monitoring {
-                Text(sessionController.heuristicEngine.diagnosticSummary)
+                Text(sessionController.heuristicDiagnosticSummary)
                     .font(.caption2)
                     .monospacedDigit()
             }
@@ -241,7 +239,7 @@ struct WatchRootView: View {
             Toggle("Verbose Diagnostics", isOn: runtimeDiagnosticsBinding)
             #endif
 
-            Text("Includes detailed heart-rate and heuristic logs. Increases file I/O and battery use.")
+            Text("Includes detailed motion, recorder, heart-rate, and heuristic logs. Increases file I/O and battery use.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -275,18 +273,18 @@ struct WatchRootView: View {
             }
 
             LabeledContent("Baseline Ready") {
-                Text(sessionController.heuristicEngine.baselineReady ? "Yes" : "No")
+                Text(sessionController.heuristicSnapshot.baselineReady ? "Yes" : "No")
                     .font(.caption2)
             }
 
             LabeledContent("Baseline BPM") {
-                Text(sessionController.heuristicEngine.baselineHeartRate.map { String(format: "%.0f", $0) } ?? "--")
+                Text(sessionController.heuristicSnapshot.baselineHeartRate.map { String(format: "%.0f", $0) } ?? "--")
                     .font(.caption2)
                     .monospacedDigit()
             }
 
             LabeledContent("Baseline Samples") {
-                Text("\(sessionController.heuristicEngine.baselineSampleCount)")
+                Text("\(sessionController.heuristicSnapshot.baselineSampleCount)")
                     .font(.caption2)
                     .monospacedDigit()
             }
@@ -317,15 +315,41 @@ struct WatchRootView: View {
             }
 
             HStack {
-                Text(workoutSessionLabel)
-                    .font(.caption)
+                Text("Live Motion")
+                .font(.caption)
                 Spacer()
-                Image(systemName: sessionController.isWorkoutSessionRunning ? "checkmark.circle.fill" : "xmark.circle")
-                    .foregroundStyle(sessionController.isWorkoutSessionRunning ? .green : .secondary)
+                Text(sessionController.motionStatus)
+                    .font(.caption2)
+            }
+
+            LabeledContent("Recorder") {
+                Text(sessionController.recorderStatus)
+                    .font(.caption2)
+            }
+
+            LabeledContent("Motion Auth") {
+                Text(sessionController.motionAuthorizationStatusDescription)
+                    .font(.caption2)
+            }
+
+            LabeledContent("Last Motion") {
+                Text(sessionController.lastMotionSampleStatus)
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Recorder Backfill") {
+                Text(sessionController.lastRecorderBackfillDescription)
+                    .font(.caption2)
+            }
+
+            LabeledContent("Occurrence Summary") {
+                Text(sessionController.lastOccurrenceSummaryStatus)
+                    .font(.caption2)
             }
 
             if sessionController.isDegradedMode {
-                Text("Degraded mode — no workout session")
+                Text("Motion degraded — exact wake fallback remains armed.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
@@ -489,11 +513,7 @@ struct WatchRootView: View {
             #if os(watchOS)
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
-                if sessionManager.powerMode == .highReliability {
-                    let suffix = sessionController.isProactiveWorkoutRunning ? " (overnight workout active)" : ""
-                    return "High Reliability armed for \(formatTime(wakeUpTime))\(suffix)"
-                }
-                return "Balanced mode armed for \(formatTime(wakeUpTime))"
+                return "\(sessionManager.powerMode.displayName) motion-first monitoring armed for \(formatTime(wakeUpTime))"
             case .backstopActive(let wakeUpTime):
                 return "Recovered Smart Wake backstop active for \(formatTime(wakeUpTime))"
             case .needsForegroundToArm(let wakeUpTime):
@@ -517,21 +537,6 @@ struct WatchRootView: View {
         case .failed:
             return sessionController.errorMessage ?? "Unknown error"
         }
-    }
-
-    private var workoutSessionLabel: String {
-        #if DEBUG
-        if sessionController.isNoBuilderValidationActive {
-            return "Workout Session (spike)"
-        }
-        #endif
-        if sessionController.isProactiveWorkoutRunning {
-            return "Workout Session (overnight)"
-        }
-        if sessionController.isWorkoutSessionRunning {
-            return "Workout Session (monitoring)"
-        }
-        return "Workout Session"
     }
 
     #if os(watchOS)
@@ -601,8 +606,7 @@ struct WatchRootView: View {
     }
 
     private var isAmbientSleepModeActive: Bool {
-        sessionController.isProactiveWorkoutRunning
-            || sessionController.sessionState == .monitoring
+        sessionController.sessionState == .monitoring
             || sessionController.sessionState == .triggered
     }
 

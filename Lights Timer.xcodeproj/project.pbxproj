@@ -463,6 +463,7 @@
 				DEVELOPMENT_TEAM = 39JCQY86NE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Lights Timer reads sleep stages and overnight vitals to calibrate Smart Wake thresholds after your alarm fires.";
 				INFOPLIST_KEY_NSHomeKitUsageDescription = "Lights Timer needs access to your HomeKit lights to create wake-up light schedules.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -501,6 +502,7 @@
 				DEVELOPMENT_TEAM = 39JCQY86NE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Lights Timer reads sleep stages and overnight vitals to calibrate Smart Wake thresholds after your alarm fires.";
 				INFOPLIST_KEY_NSHomeKitUsageDescription = "Lights Timer needs access to your HomeKit lights to create wake-up light schedules.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -542,7 +544,8 @@
 				INFOPLIST_FILE = "Lights-Timer-Watch-App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Lights Timer";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Lights Timer uses heart rate data to detect the optimal wake moment during your smart wake window.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Lights Timer records a background workout session to collect sensor data for smart wake detection.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Lights Timer only requests workout-writing access for optional Smart Wake diagnostics experiments.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Lights Timer uses Apple Watch motion data during your smart wake window to detect when you are waking up.";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.PeterGelgor.Lights-Timer";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer.watchkitapp";
@@ -573,7 +576,8 @@
 				INFOPLIST_FILE = "Lights-Timer-Watch-App-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Lights Timer";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "Lights Timer uses heart rate data to detect the optimal wake moment during your smart wake window.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Lights Timer records a background workout session to collect sensor data for smart wake detection.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Lights Timer only requests workout-writing access for optional Smart Wake diagnostics experiments.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Lights Timer uses Apple Watch motion data during your smart wake window to detect when you are waking up.";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "com.PeterGelgor.Lights-Timer";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.PeterGelgor.Lights-Timer.watchkitapp";

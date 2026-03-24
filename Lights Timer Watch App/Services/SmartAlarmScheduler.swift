@@ -26,6 +26,7 @@ private struct PendingWake: Equatable {
     let windowStart: Date
     let baselineStart: Date
     let scheduledSessionStart: Date
+    let armedAt: Date
 
     func matchesOccurrence(_ other: PendingWake) -> Bool {
         schedule.id == other.schedule.id
@@ -73,8 +74,6 @@ final class SmartAlarmScheduler: NSObject {
     /// Small buffer before the wake window start for workout/query setup.
     private let sessionSetupBuffer: TimeInterval = 120
     private let armingHorizon: TimeInterval = 35 * 3600
-    private let maxProactiveLeadTime: TimeInterval = 10 * 3600
-
     var onStatusChanged: (() -> Void)?
 
     init(
@@ -296,7 +295,9 @@ final class SmartAlarmScheduler: NSObject {
                     )
                     startMonitoringNow(
                         schedule: record.schedule,
-                        wakeUpTime: record.wakeUpTime
+                        wakeUpTime: record.wakeUpTime,
+                        windowStart: record.windowStart,
+                        armedAt: record.armedAt
                     )
                 }
             } else {
@@ -400,7 +401,8 @@ final class SmartAlarmScheduler: NSObject {
             wakeUpTime: wakeUpTime,
             windowStart: windowStart,
             baselineStart: baselineStart,
-            scheduledSessionStart: baselineStart
+            scheduledSessionStart: baselineStart,
+            armedAt: now
         )
         logStore.prepareSessionLogIfNeeded(
             schedule: nextSchedule,
@@ -448,23 +450,26 @@ final class SmartAlarmScheduler: NSObject {
                     wakeUpTime: wakeUpTime,
                     windowStart: windowStart,
                     baselineStart: baselineStart,
-                    scheduledSessionStart: preservedSessionStart
+                    scheduledSessionStart: preservedSessionStart,
+                    armedAt: pendingSchedule?.armedAt ?? now
                 )
                 currentSessionScheduleID = nextSchedule.id
                 currentSessionWakeTime = wakeUpTime
                 alarmSessionError = nil
                 armingState = .armed(wakeUpTime: wakeUpTime, monitoringStart: baselineStart)
+                if isSceneActive, let pendingSchedule {
+                    sessionController.prepareArmedWake(
+                        schedule: pendingSchedule.schedule,
+                        wakeUpTime: pendingSchedule.wakeUpTime,
+                        windowStart: pendingSchedule.windowStart,
+                        armedAt: pendingSchedule.armedAt,
+                        calibrationProfile: sessionManager.calibrationProfile
+                    )
+                }
                 logStore.log(
                     "SCHEDULER",
                     "Extended runtime session already armed for '\(nextSchedule.name)'; refreshed pending payload without re-scheduling"
                 )
-                if let pendingSchedule {
-                    maybeStartProactiveWorkout(
-                        for: pendingSchedule,
-                        now: now,
-                        reason: "Starting deferred proactive workout"
-                    )
-                }
                 return
             }
         }
@@ -475,7 +480,12 @@ final class SmartAlarmScheduler: NSObject {
                 "Already inside the monitoring period for '\(nextSchedule.name)'; starting monitoring immediately"
             )
             scheduledMonitoringDate = nil
-            startMonitoringNow(schedule: nextSchedule, wakeUpTime: wakeUpTime)
+            startMonitoringNow(
+                schedule: nextSchedule,
+                wakeUpTime: wakeUpTime,
+                windowStart: windowStart,
+                armedAt: nextWake.armedAt
+            )
             return
         }
 
@@ -549,9 +559,6 @@ final class SmartAlarmScheduler: NSObject {
         isSceneActive = true
         logStore.log("SCHEDULER", "App returned to foreground — re-evaluating schedules")
         schedulesDidUpdate(sessionManager.activeSchedules)
-        sessionController.attemptForegroundWorkoutRecoveryIfNeeded(
-            reason: "app returned to foreground during degraded monitoring"
-        )
     }
 
     func onAppBackground() {
@@ -689,7 +696,8 @@ final class SmartAlarmScheduler: NSObject {
             wakeUpTime: wakeUpTime,
             windowStart: windowStart,
             baselineStart: baselineStart,
-            scheduledSessionStart: date
+            scheduledSessionStart: date,
+            armedAt: Date()
         )
 
         extendedSession = session
@@ -699,6 +707,13 @@ final class SmartAlarmScheduler: NSObject {
         recoveredRunningBackstopWake = nil
         savePendingWakeRecord(for: wake)
         session.start(at: date)
+        sessionController.prepareArmedWake(
+            schedule: wake.schedule,
+            wakeUpTime: wake.wakeUpTime,
+            windowStart: wake.windowStart,
+            armedAt: wake.armedAt,
+            calibrationProfile: sessionManager.calibrationProfile
+        )
 
         scheduledMonitoringDate = date
         alarmSessionError = nil
@@ -707,24 +722,10 @@ final class SmartAlarmScheduler: NSObject {
             "SCHEDULER",
             "Scheduled extended runtime session for '\(schedule.name)' at \(formatTimestamp(date)). monitoringStart=\(formatTimestamp(baselineStart))"
         )
-
-        if sessionManager.powerMode == .highReliability {
-            let now = Date()
-            if wake.baselineStart.timeIntervalSince(now) <= maxProactiveLeadTime {
-                maybeStartProactiveWorkout(
-                    for: wake,
-                    now: now,
-                    reason: "Starting proactive workout immediately after arming"
-                )
-            } else {
-                logDeferredProactiveWorkout(for: wake, now: now)
-            }
-        } else {
-            logStore.log(
-                "SCHEDULER",
-                "Balanced mode armed for '\(schedule.name)' — skipping overnight proactive workout"
-            )
-        }
+        logStore.log(
+            "SCHEDULER",
+            "\(sessionManager.powerMode.displayName) mode armed for '\(schedule.name)' using the motion-first monitoring path"
+        )
     }
 
     /// Best-effort: cancel the current premature session and re-schedule at the
@@ -748,7 +749,8 @@ final class SmartAlarmScheduler: NSObject {
             wakeUpTime: wakeUpTime,
             windowStart: windowStart,
             baselineStart: correctStart,
-            scheduledSessionStart: correctStart
+            scheduledSessionStart: correctStart,
+            armedAt: pending.armedAt
         )
 
         extendedSession = newSession
@@ -758,6 +760,13 @@ final class SmartAlarmScheduler: NSObject {
         savePendingWakeRecord(for: newWake)
 
         newSession.start(at: correctStart)
+        sessionController.prepareArmedWake(
+            schedule: newWake.schedule,
+            wakeUpTime: newWake.wakeUpTime,
+            windowStart: newWake.windowStart,
+            armedAt: newWake.armedAt,
+            calibrationProfile: sessionManager.calibrationProfile
+        )
 
         scheduledMonitoringDate = correctStart
         alarmSessionError = nil
@@ -774,13 +783,6 @@ final class SmartAlarmScheduler: NSObject {
     ) {
         let sessionToInvalidate = extendedSession
         let invalidatedState = sessionToInvalidate?.state
-
-        if !isRescheduling,
-           sessionController.isProactiveWorkoutRunning,
-           !sessionController.isMonitoringActive,
-           !sessionController.isMonitoringStartupInProgress {
-            sessionController.stopProactiveWorkout()
-        }
 
         clearSchedulerState(
             clearPersistedWake: clearPersistedWake,
@@ -830,7 +832,12 @@ final class SmartAlarmScheduler: NSObject {
         armingState = .failed(message: failureMessage)
     }
 
-    private func startMonitoringNow(schedule: WatchScheduleSnapshot, wakeUpTime: Date) {
+    private func startMonitoringNow(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        windowStart: Date? = nil,
+        armedAt: Date? = nil
+    ) {
         guard !sessionController.isMonitoringActive, !sessionController.isMonitoringStartupInProgress else {
             logStore.log(
                 "SCHEDULER",
@@ -856,6 +863,16 @@ final class SmartAlarmScheduler: NSObject {
         currentSessionScheduleID = schedule.id
         currentSessionWakeTime = wakeUpTime
 
+        let effectiveWindowStart = windowStart
+            ?? pendingSchedule?.windowStart
+            ?? wakeUpTime.addingTimeInterval(-Double(schedule.smartWakeWindowMinutes) * 60)
+        let effectiveArmedAt = armedAt
+            ?? pendingSchedule?.armedAt
+            ?? loadPersistedPendingWakeRecord(
+                reason: "Monitoring startup restored the pending wake arm time"
+            )?.armedAt
+            ?? Date()
+
         pendingSchedule = nil
         recoveredRunningBackstopWake = nil
         scheduledMonitoringDate = nil
@@ -865,14 +882,24 @@ final class SmartAlarmScheduler: NSObject {
         sessionController.hapticPatternType =
             HapticPattern(rawValue: schedule.hapticPatternRaw) ?? .gentle
 
+        sessionController.prepareArmedWake(
+            schedule: schedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: effectiveWindowStart,
+            armedAt: effectiveArmedAt,
+            calibrationProfile: sessionManager.calibrationProfile
+        )
+
         Task {
             await sessionController.startMonitoring(
                 schedule: schedule,
-                wakeUpTime: wakeUpTime
+                wakeUpTime: wakeUpTime,
+                armedAt: effectiveArmedAt,
+                calibrationProfile: sessionManager.calibrationProfile
             )
             logStore.log(
                 "SCHEDULER",
-                "HR monitoring started for '\(schedule.name)' with haptic=\(sessionController.hapticPatternType.displayName)"
+                "Motion-first monitoring started for '\(schedule.name)' with haptic=\(sessionController.hapticPatternType.displayName)"
             )
         }
     }
@@ -904,47 +931,6 @@ final class SmartAlarmScheduler: NSObject {
         return formatter
     }()
 
-    private func maybeStartProactiveWorkout(
-        for wake: PendingWake,
-        now: Date,
-        reason: String
-    ) {
-        guard sessionManager.powerMode == .highReliability else { return }
-        guard isSceneActive else { return }
-        guard !sessionController.isMonitoringActive,
-              !sessionController.isMonitoringStartupInProgress,
-              !sessionController.isProactiveWorkoutRunning else { return }
-
-        let timeUntilMonitoring = wake.baselineStart.timeIntervalSince(now)
-        guard timeUntilMonitoring > 0, timeUntilMonitoring <= maxProactiveLeadTime else { return }
-
-        logStore.log(
-            "SCHEDULER",
-            "\(reason) — monitoring in \(formatLeadTime(timeUntilMonitoring))"
-        )
-        sessionController.preStartWorkoutSession()
-    }
-
-    private func logDeferredProactiveWorkout(for wake: PendingWake, now: Date) {
-        guard sessionManager.powerMode == .highReliability else { return }
-        let timeUntilMonitoring = wake.baselineStart.timeIntervalSince(now)
-        guard timeUntilMonitoring > maxProactiveLeadTime else { return }
-
-        logStore.log(
-            "SCHEDULER",
-            "Deferring proactive workout start — monitoring is \(formatLeadTime(timeUntilMonitoring)) away, max lead time is 10h"
-        )
-    }
-
-    private func formatLeadTime(_ interval: TimeInterval) -> String {
-        let hours = interval / 3600
-        if hours >= 1 {
-            return String(format: "%.1fh", hours)
-        }
-
-        return "\(max(1, Int(interval / 60)))m"
-    }
-
     // MARK: - Schedule Helpers
 
     /// Compute the session start time to maximize wake-window coverage within
@@ -973,6 +959,7 @@ final class SmartAlarmScheduler: NSObject {
             windowStart: record.windowStart,
             baselineStart: correctStart,
             scheduledSessionStart: record.scheduledSessionStart,
+            armedAt: record.armedAt,
             savedAt: record.savedAt,
             isSessionScheduled: record.isSessionScheduled
         )
@@ -1128,6 +1115,15 @@ final class SmartAlarmScheduler: NSObject {
             wakeWindowStart: wake.windowStart,
             reason: reason
         )
+        if isSceneActive {
+            sessionController.prepareArmedWake(
+                schedule: wake.schedule,
+                wakeUpTime: wake.wakeUpTime,
+                windowStart: wake.windowStart,
+                armedAt: wake.armedAt,
+                calibrationProfile: sessionManager.calibrationProfile
+            )
+        }
         sessionController.updateNextScheduledWakeWindow(
             schedule: wake.schedule,
             wakeUpTime: wake.wakeUpTime
@@ -1140,7 +1136,8 @@ final class SmartAlarmScheduler: NSObject {
             wakeUpTime: record.wakeUpTime,
             windowStart: record.windowStart,
             baselineStart: record.baselineStart,
-            scheduledSessionStart: record.scheduledSessionStart
+            scheduledSessionStart: record.scheduledSessionStart,
+            armedAt: record.armedAt
         )
     }
 
@@ -1168,6 +1165,7 @@ final class SmartAlarmScheduler: NSObject {
                 windowStart: wake.windowStart,
                 baselineStart: wake.baselineStart,
                 scheduledSessionStart: wake.scheduledSessionStart,
+                armedAt: wake.armedAt,
                 savedAt: Date(),
                 isSessionScheduled: isSessionScheduled
             )
@@ -1282,7 +1280,9 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                 } else {
                     self.startMonitoringNow(
                         schedule: pending.schedule,
-                        wakeUpTime: pending.wakeUpTime
+                        wakeUpTime: pending.wakeUpTime,
+                        windowStart: pending.windowStart,
+                        armedAt: pending.armedAt
                     )
                 }
             }
@@ -1318,7 +1318,12 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                self.sessionController.sessionState != .triggered,
                let pending = self.pendingSchedule {
                 // Session expiring before monitoring started — last chance to start it.
-                self.startMonitoringNow(schedule: pending.schedule, wakeUpTime: pending.wakeUpTime)
+                self.startMonitoringNow(
+                    schedule: pending.schedule,
+                    wakeUpTime: pending.wakeUpTime,
+                    windowStart: pending.windowStart,
+                    armedAt: pending.armedAt
+                )
             } else if self.sessionController.isMonitoringActive,
                       self.sessionController.sessionState != .triggered {
                 self.logStore.log(
@@ -1364,17 +1369,6 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                     "Extended runtime session invalidated. reason=\(reason.rawValue)",
                     level: .warning
                 )
-            }
-
-            if self.sessionController.isProactiveWorkoutRunning,
-               !self.sessionController.isMonitoringActive,
-               !self.sessionController.isMonitoringStartupInProgress {
-                self.logStore.log(
-                    "SCHEDULER",
-                    "Extended runtime session invalidated while proactive workout was active — stopping proactive workout",
-                    level: .warning
-                )
-                self.sessionController.stopProactiveWorkout()
             }
 
             if self.pendingSchedule != nil {

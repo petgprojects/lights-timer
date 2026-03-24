@@ -13,6 +13,7 @@ final class SmartWakeCoordinator {
     private let modelContainer: ModelContainer
     private let logStore: PhoneLogStore
     private let settingsStore: SmartWakeSettingsStore
+    private let calibrationService: SmartWakeCalibrationService
 
     private var firedToday: [UUID: Date] = [:]
     private var processedHandoffs: [UUID: ProcessedHandoffRecord] = [:]
@@ -30,13 +31,15 @@ final class SmartWakeCoordinator {
         watchConnectivity: WatchConnectivityService,
         modelContainer: ModelContainer,
         logStore: PhoneLogStore,
-        settingsStore: SmartWakeSettingsStore
+        settingsStore: SmartWakeSettingsStore,
+        calibrationService: SmartWakeCalibrationService
     ) {
         self.scheduleEngine = scheduleEngine
         self.watchConnectivity = watchConnectivity
         self.modelContainer = modelContainer
         self.logStore = logStore
         self.settingsStore = settingsStore
+        self.calibrationService = calibrationService
 
         watchConnectivity.onSmartWakeTrigger = { [weak self] trigger in
             guard let self else { return }
@@ -64,7 +67,7 @@ final class SmartWakeCoordinator {
 
     func handleTrigger(_ trigger: SmartWakeTriggerPayload) async {
         log(
-            "Trigger received \(trigger.triggerID) for schedule \(trigger.scheduleID), confidence=\(trigger.confidence), heartRate=\(trigger.heartRateAtTrigger.map { String(format: "%.1f", $0) } ?? "n/a"), motion=\(trigger.motionLevel.map { String(format: "%.2f", $0) } ?? "n/a")"
+            "Trigger received \(trigger.triggerID) for schedule \(trigger.scheduleID), confidence=\(trigger.confidence), heartRate=\(trigger.heartRateAtTrigger.map { String(format: "%.1f", $0) } ?? "n/a"), motion=\(trigger.motionLevel.map { String(format: "%.2f", $0) } ?? "n/a"), motionScore=\(trigger.motionScore.map { String(format: "%.3f", $0) } ?? "n/a"), hrFreshness=\(trigger.hrFreshnessSeconds.map { String(format: "%.0fs", $0) } ?? "n/a"), motionFreshness=\(trigger.motionFreshnessSeconds.map { String(format: "%.1fs", $0) } ?? "n/a")"
         )
 
         pruneProcessedHandoffs()
@@ -319,9 +322,13 @@ final class SmartWakeCoordinator {
             let snapshots = schedules
                 .filter(\.usesSmartWake)
                 .map { WatchScheduleSnapshot(from: $0) }
-            watchConnectivity.sendSchedules(snapshots, powerMode: settingsStore.powerMode)
+            watchConnectivity.sendSchedules(
+                snapshots,
+                powerMode: settingsStore.powerMode,
+                calibrationProfile: calibrationService.calibrationProfile
+            )
             log(
-                "Synced \(snapshots.count) smart wake schedule(s) to watch with powerMode=\(settingsStore.powerMode.rawValue)"
+                "Synced \(snapshots.count) smart wake schedule(s) to watch with powerMode=\(settingsStore.powerMode.rawValue) calibrationNights=\(calibrationService.calibrationProfile.nightsConsidered)"
             )
         } catch {
             log("Failed to sync schedules: \(error)", level: .error)

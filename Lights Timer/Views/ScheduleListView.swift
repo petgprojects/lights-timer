@@ -217,6 +217,7 @@ struct ScheduleListView: View {
     )
     let container = try! ModelContainer(for: LightSchedule.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
     let settingsStore = SmartWakeSettingsStore()
+    let calibrationService = SmartWakeCalibrationService(logStore: phoneLogStore)
     let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
     NavigationStack {
         ScheduleListView()
@@ -231,10 +232,12 @@ struct ScheduleListView: View {
             watchConnectivity: connectivity,
             modelContainer: container,
             logStore: phoneLogStore,
-            settingsStore: settingsStore
+            settingsStore: settingsStore,
+            calibrationService: calibrationService
         )
     )
     .environment(settingsStore)
+    .environment(calibrationService)
     .environment(connectivity)
     .environment(watchLogArchive)
 }

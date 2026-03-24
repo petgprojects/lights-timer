@@ -1,4 +1,5 @@
 import Foundation
+import CoreMotion
 import HealthKit
 import HomeKit
 #if os(watchOS)
@@ -44,6 +45,12 @@ final class SmartWakeSessionController: NSObject {
     private(set) var lastHRSampleDate: Date?
     private(set) var passiveObservationStatus = "Inactive"
     private(set) var lastPassiveHeartRateSampleDescription = "No background sample yet"
+    private(set) var heuristicSnapshot = SmartWakeHeuristicSnapshot.empty
+    private(set) var lastLiveMotionSampleDescription = "No live motion yet"
+    private(set) var lastRecorderBackfillDescription = "No recorder backfill yet"
+    private(set) var lastOccurrenceSummaryStatus = "No occurrence summary yet"
+    private(set) var motionStatus = "Motion idle"
+    private(set) var recorderStatus = "Recorder idle"
     private(set) var isMonitoringActive = false
     private(set) var isMonitoringStartupInProgress = false
     private(set) var isWorkoutSessionRunning = false
@@ -72,15 +79,24 @@ final class SmartWakeSessionController: NSObject {
 
     private let homeKitService: WatchHomeKitService
     private let lightController: WatchLightController
+    private let motionManager = CMMotionManager()
+    private let sensorRecorder = CMSensorRecorder()
+    private let motionQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "LightsTimer.SmartWakeMotionQueue"
+        queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
 
     private var workoutSession: HKWorkoutSession?
     private var workoutBuilder: HKLiveWorkoutBuilder?
     private var heartRateQuery: HKAnchoredObjectQuery?
     private var passiveHeartRateObserverQuery: HKObserverQuery?
     private var exactWakeTimer: Timer?
-    private var seedTimeoutTimer: Timer?
     private var windowStartTimer: Timer?
-    private var historicalSeedTask: Task<Void, Never>?
+    private var recorderRefreshTimer: Timer?
+    private var recorderBackfillTask: Task<Void, Never>?
     private var lightRampTask: Task<Void, Never>?
     private var deferredLightRampTask: Task<Void, Never>?
     private var workoutRecoveryRetryTask: Task<Void, Never>?
@@ -95,8 +111,15 @@ final class SmartWakeSessionController: NSObject {
     private var activeTriggerDate: Date?
     private var activeTriggerWakeUpTime: Date?
     private var activeTriggerFallbackMode: WatchFallbackMode?
+    private var activeTriggerConfidence: Double?
+    private var activeTriggerMotionScore: Double?
+    private var activeTriggerSensorProvenance: SmartWakeSensorProvenance?
     private var activeLocalRampTriggerID: UUID?
     private var didLogWakeWindowStart = false
+    private var armedAt: Date?
+    private var currentCalibrationProfile: SmartWakeCalibrationProfile = SmartWakeSharedStore.loadCalibrationProfile()
+    private var preparedWakeSignature: String?
+    private var didArmRecorderForPreparedWake = false
 
     // Haptic alarm
     private var hapticTimer: Timer?
@@ -107,8 +130,10 @@ final class SmartWakeSessionController: NSObject {
     #endif
     private let hapticDuration: TimeInterval = 60
     private let hapticTimerResolution: TimeInterval = 0.1
-    private let historicalSeedLookback: TimeInterval = 7200
-    private let historicalSeedTimeout: TimeInterval = 30
+    private let recorderLookback: TimeInterval = 7200
+    private let recorderLagAllowance: TimeInterval = 180
+    private let recorderRefreshInterval: TimeInterval = 60
+    private let recorderMaxDuration: TimeInterval = 12 * 60 * 60
     private let watchLightHandoffDelay: TimeInterval = 8
     private let workoutRecoveryRetryDelay: TimeInterval = 8
     private let workoutRecoveryRetryValidationDelay: TimeInterval = 3
@@ -126,6 +151,7 @@ final class SmartWakeSessionController: NSObject {
     var onLogReadyToTransfer: ((URL) -> Void)?
     var onAuthorizationChanged: (() -> Void)?
     var onPresentationStateChanged: (() -> Void)?
+    var onOccurrenceSummaryReady: ((SmartWakeOccurrenceSummary) -> Void)?
 
     init(logStore: SmartWakeLogStore) {
         self.logStore = logStore
@@ -134,18 +160,14 @@ final class SmartWakeSessionController: NSObject {
         self.lightController = WatchLightController(homeKitService: homeKitService)
         super.init()
 
-        heuristicEngine.logHandler = { [weak self] level, message in
-            self?.log("HEURISTIC", message, level: level)
-        }
-        heuristicEngine.verboseDiagnosticsProvider = { [weak self] in
-            self?.logStore.runtimeDiagnosticsEnabled ?? false
-        }
         homeKitService.logHandler = { [weak self] level, message in
             self?.log("HOMEKIT", message, level: level)
         }
         lightController.logHandler = { [weak self] level, message in
             self?.log("LIGHTS", message, level: level)
         }
+
+        motionManager.deviceMotionUpdateInterval = 0.1
     }
 
     private func log(_ category: String, _ message: String, level: SmartWakeLogLevel = .info) {
@@ -204,6 +226,42 @@ final class SmartWakeSessionController: NSObject {
         return "\(formatElapsed(Date().timeIntervalSince(lastHRSampleDate))) ago"
     }
 
+    var lastMotionSampleStatus: String {
+        guard let freshness = heuristicSnapshot.motionFreshnessSeconds else { return "--" }
+        return "\(formatElapsed(freshness)) ago"
+    }
+
+    var heuristicDiagnosticSummary: String {
+        heuristicSnapshot.diagnosticSummary
+    }
+
+    var motionAuthorizationStatusDescription: String {
+        switch CMSensorRecorder.authorizationStatus() {
+        case .authorized:
+            return "Authorized"
+        case .denied:
+            return "Denied"
+        case .restricted:
+            return "Restricted"
+        case .notDetermined:
+            return "Not Determined"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    var motionStatusPayload: SmartWakePermissionStatus {
+        let authorizationStatus = CMSensorRecorder.authorizationStatus()
+        return SmartWakePermissionStatus(
+            heartRateDataActive: hasConfirmedHRAccess,
+            watchConnected: true,
+            motionAvailable: motionManager.isDeviceMotionAvailable,
+            motionAuthorized: authorizationStatus == .authorized,
+            recorderAvailable: CMSensorRecorder.isAccelerometerRecordingAvailable(),
+            recorderAuthorized: authorizationStatus == .authorized
+        )
+    }
+
     private func describeFallbackMode(_ mode: WatchFallbackMode) -> String {
         switch mode {
         case .earlyRamp:
@@ -245,11 +303,12 @@ final class SmartWakeSessionController: NSObject {
 
     func requestAuthorization() async -> Bool {
         let heartRate = HKQuantityType(.heartRate)
-        let activeEnergy = HKQuantityType(.activeEnergyBurned)
-        let workout = HKObjectType.workoutType()
-
-        let readTypes: Set<HKObjectType> = [heartRate, activeEnergy]
-        let writeTypes: Set<HKSampleType> = [workout]
+        let readTypes: Set<HKObjectType> = [heartRate]
+        #if DEBUG
+        let writeTypes: Set<HKSampleType> = [HKObjectType.workoutType()]
+        #else
+        let writeTypes: Set<HKSampleType> = []
+        #endif
 
         do {
             try await healthStore.requestAuthorization(toShare: writeTypes, read: readTypes)
@@ -477,9 +536,36 @@ final class SmartWakeSessionController: NSObject {
 
     // MARK: - Session Lifecycle
 
+    func prepareArmedWake(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        windowStart: Date,
+        armedAt: Date,
+        calibrationProfile: SmartWakeCalibrationProfile
+    ) {
+        self.armedAt = armedAt
+        currentCalibrationProfile = calibrationProfile.clamped()
+        let signature = "\(schedule.id.uuidString)-\(wakeUpTime.timeIntervalSince1970)"
+
+        if preparedWakeSignature == signature && didArmRecorderForPreparedWake {
+            return
+        }
+        refreshMotionCapabilityStatus()
+        let didArmRecorder = startRecordedMotionCaptureIfPossible(
+            schedule: schedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: windowStart,
+            armedAt: armedAt
+        )
+        preparedWakeSignature = signature
+        didArmRecorderForPreparedWake = didArmRecorder
+    }
+
     func startMonitoring(
         schedule: WatchScheduleSnapshot,
-        wakeUpTime: Date
+        wakeUpTime: Date,
+        armedAt: Date?,
+        calibrationProfile: SmartWakeCalibrationProfile
     ) async {
         #if DEBUG
         guard !isNoBuilderValidationActive else {
@@ -500,116 +586,58 @@ final class SmartWakeSessionController: NSObject {
         let windowStartTime = wakeUpTime.addingTimeInterval(
             -Double(schedule.smartWakeWindowMinutes) * 60
         )
+        let effectiveArmedAt = armedAt ?? Date()
+
+        prepareArmedWake(
+            schedule: schedule,
+            wakeUpTime: wakeUpTime,
+            windowStart: windowStartTime,
+            armedAt: effectiveArmedAt,
+            calibrationProfile: calibrationProfile
+        )
 
         errorMessage = nil
         currentSchedule = schedule
         currentScheduleID = schedule.id
         self.wakeUpTime = wakeUpTime
         self.windowStartTime = windowStartTime
+        self.armedAt = effectiveArmedAt
         resetWorkoutRecoveryRetryState()
         lastHRSampleDate = nil
         didLogWakeWindowStart = false
-        heuristicEngine.configure(wakeWindowStart: windowStartTime)
+        heuristicSnapshot = await heuristicEngine.configure(
+            wakeWindowStart: windowStartTime,
+            wakeUpTime: wakeUpTime,
+            calibrationProfile: currentCalibrationProfile
+        )
+        seenSampleUUIDs.removeAll()
+
         log(
             "SESSION",
-            "Starting monitoring for '\(schedule.name)' wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStartTime)) haptic=\(hapticPatternType.displayName)"
+            "Starting motion-first monitoring for '\(schedule.name)' wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStartTime)) armedAt=\(formatTimestamp(effectiveArmedAt)) haptic=\(hapticPatternType.displayName)"
         )
 
         isMonitoringStartupInProgress = true
+        isMonitoringActive = true
         isDegradedMode = false
         sessionState = .monitoring
         notifyStateChange()
 
-        if !isProactiveWorkoutRunning, workoutSession != nil {
-            clearWorkoutSessionReference(
-                reason: "Cleaning up stale non-proactive workout state before monitoring start",
-                level: .warning
-            )
-        }
+        startHeartRateQuery(from: Date(), until: wakeUpTime)
+        startLiveMotionUpdates()
+        scheduleExactWakeTimer()
+        scheduleWindowStartTimer()
+        scheduleRecorderRefreshTimer()
+        await refreshRecorderBackfill(reason: "session-start")
 
-        do {
-            if isProactiveWorkoutRunning {
-                if isWorkoutSessionUsable() {
-                    log("SESSION", "Reusing proactive workout session for monitoring")
-                    isProactiveWorkoutRunning = false
-                    beginMonitoringDataFlow(
-                        wakeUpTime: wakeUpTime,
-                        windowStartTime: windowStartTime
-                    )
-                } else {
-                    log(
-                        "SESSION",
-                        "Proactive workout session is no longer usable; falling back to monitoring-time workout start",
-                        level: .warning
-                    )
-                    stopProactiveWorkout()
-                    try await startWorkoutSession()
+        isMonitoringStartupInProgress = false
+        notifyStateChange()
+        checkForWakeTrigger()
 
-                    if isDegradedMode {
-                        log(
-                            "SESSION",
-                            "Workout session ended during monitoring startup — entering degraded mode",
-                            level: .warning
-                        )
-                        clearWorkoutSessionReference(
-                            reason: "Clearing failed monitoring-startup workout state",
-                            level: .warning
-                        )
-                        startDegradedMonitoring()
-                        scheduleWorkoutRecoveryRetryIfNeeded(
-                            reason: "workout session ended during monitoring startup"
-                        )
-                        return
-                    }
-
-                    beginMonitoringDataFlow(
-                        wakeUpTime: wakeUpTime,
-                        windowStartTime: windowStartTime
-                    )
-                }
-            } else {
-                try await startWorkoutSession()
-
-                if isDegradedMode {
-                    log(
-                        "SESSION",
-                        "Workout session ended during monitoring startup — entering degraded mode",
-                        level: .warning
-                    )
-                    clearWorkoutSessionReference(
-                        reason: "Clearing failed monitoring-startup workout state",
-                        level: .warning
-                    )
-                    startDegradedMonitoring()
-                    scheduleWorkoutRecoveryRetryIfNeeded(
-                        reason: "workout session ended during monitoring startup"
-                    )
-                    return
-                }
-
-                beginMonitoringDataFlow(
-                    wakeUpTime: wakeUpTime,
-                    windowStartTime: windowStartTime
-                )
-            }
-
-            log("SESSION", "Monitoring started successfully for schedule \(schedule.id.uuidString)")
-        } catch {
-            isMonitoringStartupInProgress = false
-            clearWorkoutSessionReference(
-                reason: "Clearing workout session after monitoring-startup failure",
-                level: .warning
-            )
-            log(
-                "SESSION",
-                "Workout session failed: \(error.localizedDescription). Switching to degraded monitoring.",
-                level: .warning
-            )
-            startDegradedMonitoring()
-            scheduleWorkoutRecoveryRetryIfNeeded(
-                reason: "workout startup threw \(error.localizedDescription)"
-            )
-        }
+        log(
+            "SESSION",
+            "Motion-first monitoring active for '\(schedule.name)'. motionAvailable=\(motionManager.isDeviceMotionAvailable) recorderStatus='\(recorderStatus)'"
+        )
     }
 
     func finishMonitoringAfterTrigger() {
@@ -617,7 +645,7 @@ final class SmartWakeSessionController: NSObject {
 
         log(
             "SESSION",
-            "Finishing monitoring after trigger. Workout session kept alive for post-trigger work (haptics, handoff, light fallback)."
+            "Finishing monitoring after trigger. Haptics, handoff, and watch fallback remain active until post-trigger work completes."
         )
         tearDownMonitoringSession()
         currentSchedule = nil
@@ -627,23 +655,16 @@ final class SmartWakeSessionController: NSObject {
         didLogWakeWindowStart = false
         isMonitoringActive = false
 
-        // Defer workout teardown until haptics + light fallback are done,
-        // so the workout-processing background assertion stays alive.
         Task { [weak self] in
             await self?.waitForPostTriggerWork()
             await MainActor.run {
                 guard let self else { return }
-                self.log("SESSION", "Post-trigger work complete — ending workout session")
+                self.log("SESSION", "Post-trigger work complete — ending any remaining diagnostic workout session")
             }
             await self?.endWorkoutSession()
             await MainActor.run {
                 guard let self else { return }
-                self.activeTriggerID = nil
-                self.activeTriggerSchedule = nil
-                self.activeTriggerDate = nil
-                self.activeTriggerWakeUpTime = nil
-                self.activeTriggerFallbackMode = nil
-                self.activeLocalRampTriggerID = nil
+                self.clearTriggerContext()
                 self.sessionState = .idle
                 self.notifyStateChange()
                 self.onPostTriggerWorkComplete?()
@@ -673,6 +694,7 @@ final class SmartWakeSessionController: NSObject {
     }
 
     func stopMonitoring() {
+        persistCurrentOccurrenceSummary(fallbackReason: "monitoring stopped")
         log("SESSION", "Stopping monitoring manually")
         tearDownMonitoringSession()
         stopHaptics()
@@ -680,12 +702,7 @@ final class SmartWakeSessionController: NSObject {
         deferredLightRampTask = nil
         lightRampTask?.cancel()
         lightRampTask = nil
-        activeLocalRampTriggerID = nil
-        activeTriggerID = nil
-        activeTriggerSchedule = nil
-        activeTriggerDate = nil
-        activeTriggerWakeUpTime = nil
-        activeTriggerFallbackMode = nil
+        clearTriggerContext()
 
         currentSchedule = nil
         currentScheduleID = nil
@@ -708,6 +725,7 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func failMonitoring(_ message: String) {
+        persistCurrentOccurrenceSummary(fallbackReason: message)
         log("SESSION", "Monitoring failed: \(message)", level: .error)
         tearDownMonitoringSession()
         stopHaptics()
@@ -715,12 +733,7 @@ final class SmartWakeSessionController: NSObject {
         deferredLightRampTask = nil
         lightRampTask?.cancel()
         lightRampTask = nil
-        activeLocalRampTriggerID = nil
-        activeTriggerID = nil
-        activeTriggerSchedule = nil
-        activeTriggerDate = nil
-        activeTriggerWakeUpTime = nil
-        activeTriggerFallbackMode = nil
+        clearTriggerContext()
 
         currentSchedule = nil
         currentScheduleID = nil
@@ -743,15 +756,430 @@ final class SmartWakeSessionController: NSObject {
 
     private func tearDownMonitoringSession() {
         invalidateMonitoringTimers()
-
-        historicalSeedTask?.cancel()
-        historicalSeedTask = nil
+        stopLiveMotionUpdates()
+        recorderBackfillTask?.cancel()
+        recorderBackfillTask = nil
+        preparedWakeSignature = nil
+        didArmRecorderForPreparedWake = false
 
         stopHeartRateQuery()
         seenSampleUUIDs.removeAll()
         lastHRSampleDate = nil
         isMonitoringStartupInProgress = false
         resetWorkoutRecoveryRetryState()
+    }
+
+    private func clearTriggerContext() {
+        activeLocalRampTriggerID = nil
+        activeTriggerID = nil
+        activeTriggerSchedule = nil
+        activeTriggerDate = nil
+        activeTriggerWakeUpTime = nil
+        activeTriggerFallbackMode = nil
+        activeTriggerConfidence = nil
+        activeTriggerMotionScore = nil
+        activeTriggerSensorProvenance = nil
+    }
+
+    private func refreshMotionCapabilityStatus() {
+        let authorizationStatus = CMSensorRecorder.authorizationStatus()
+        motionStatus = motionManager.isDeviceMotionAvailable
+            ? "Live motion available"
+            : "Live motion unavailable"
+
+        if !CMSensorRecorder.isAccelerometerRecordingAvailable() {
+            recorderStatus = "Recorder unavailable on this watch"
+        } else {
+            switch authorizationStatus {
+            case .authorized:
+                recorderStatus = "Recorder authorized"
+            case .denied:
+                recorderStatus = "Recorder access denied"
+            case .restricted:
+                recorderStatus = "Recorder access restricted"
+            case .notDetermined:
+                recorderStatus = "Recorder access not determined"
+            @unknown default:
+                recorderStatus = "Recorder access unknown"
+            }
+        }
+
+        onAuthorizationChanged?()
+        onPresentationStateChanged?()
+    }
+
+    @discardableResult
+    private func startRecordedMotionCaptureIfPossible(
+        schedule: WatchScheduleSnapshot,
+        wakeUpTime: Date,
+        windowStart: Date,
+        armedAt: Date
+    ) -> Bool {
+        refreshMotionCapabilityStatus()
+
+        guard CMSensorRecorder.isAccelerometerRecordingAvailable() else {
+            log("MOTION", "Skipping recorder start for '\(schedule.name)' because accelerometer recording is unavailable", level: .warning)
+            return false
+        }
+
+        let authorizationStatus = CMSensorRecorder.authorizationStatus()
+        guard authorizationStatus != .denied, authorizationStatus != .restricted else {
+            log(
+                "MOTION",
+                "Skipping recorder start for '\(schedule.name)' because motion recording access is unavailable (\(motionAuthorizationStatusDescription))",
+                level: .warning
+            )
+            return false
+        }
+
+        let duration = wakeUpTime.timeIntervalSince(armedAt)
+        guard duration > 0 else {
+            recorderStatus = "Wake already passed"
+            return false
+        }
+
+        guard duration <= recorderMaxDuration else {
+            recorderStatus = "Wake is more than 12h away"
+            log(
+                "MOTION",
+                "Skipping recorder start for '\(schedule.name)' because wake is beyond the 12h recorder limit. armedAt=\(formatTimestamp(armedAt)) wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStart))",
+                level: .warning
+            )
+            return false
+        }
+
+        let requestedDuration = min(duration + recorderLagAllowance, recorderMaxDuration)
+        sensorRecorder.recordAccelerometer(forDuration: requestedDuration)
+        recorderStatus = "Recorder armed for \(formatElapsed(requestedDuration))"
+        log(
+            "MOTION",
+            "Started accelerometer recorder for '\(schedule.name)' duration=\(formatElapsed(requestedDuration)) wake=\(formatTimestamp(wakeUpTime))"
+        )
+        onPresentationStateChanged?()
+        return true
+    }
+
+    private func startLiveMotionUpdates() {
+        refreshMotionCapabilityStatus()
+        guard motionManager.isDeviceMotionAvailable else {
+            motionStatus = "Live motion unavailable"
+            isDegradedMode = true
+            onPresentationStateChanged?()
+            return
+        }
+
+        motionManager.stopDeviceMotionUpdates()
+        motionManager.deviceMotionUpdateInterval = 0.1
+        motionManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, error in
+            if let error {
+                Task { @MainActor [weak self] in
+                    self?.motionStatus = "Motion error: \(error.localizedDescription)"
+                    self?.isDegradedMode = true
+                    self?.log(
+                        "MOTION",
+                        "Device motion update failed: \(error.localizedDescription)",
+                        level: .warning
+                    )
+                    self?.onPresentationStateChanged?()
+                }
+                return
+            }
+
+            guard let motion else { return }
+            let sample = SmartWakeLiveMotionSample(
+                date: Date(),
+                userAccelerationMagnitude: Self.vectorMagnitude(
+                    x: motion.userAcceleration.x,
+                    y: motion.userAcceleration.y,
+                    z: motion.userAcceleration.z
+                ),
+                rotationMagnitude: Self.vectorMagnitude(
+                    x: motion.rotationRate.x,
+                    y: motion.rotationRate.y,
+                    z: motion.rotationRate.z
+                ),
+                gravityX: motion.gravity.x,
+                gravityY: motion.gravity.y,
+                gravityZ: motion.gravity.z,
+                pitch: motion.attitude.pitch,
+                roll: motion.attitude.roll,
+                yaw: motion.attitude.yaw
+            )
+
+            Task { @MainActor [weak self] in
+                await self?.handleLiveMotionSample(sample)
+            }
+        }
+
+        motionStatus = "Live motion active (10 Hz)"
+        onPresentationStateChanged?()
+        log("MOTION", "Started live device-motion updates at 10 Hz")
+    }
+
+    private func stopLiveMotionUpdates() {
+        motionManager.stopDeviceMotionUpdates()
+        motionStatus = "Motion idle"
+        onPresentationStateChanged?()
+    }
+
+    private func scheduleRecorderRefreshTimer() {
+        recorderRefreshTimer?.invalidate()
+        let timer = Timer.scheduledTimer(
+            withTimeInterval: recorderRefreshInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.refreshRecorderBackfill(reason: "periodic-refresh")
+            }
+        }
+        recorderRefreshTimer = timer
+    }
+
+    private func refreshRecorderBackfill(reason: String) async {
+        guard let windowStartTime, let wakeUpTime else { return }
+
+        let queryStart = max(
+            armedAt ?? windowStartTime.addingTimeInterval(-recorderLookback),
+            windowStartTime.addingTimeInterval(-recorderLookback)
+        )
+        let queryEnd = min(
+            Date().addingTimeInterval(-recorderLagAllowance),
+            wakeUpTime
+        )
+
+        guard queryEnd > queryStart else {
+            lastRecorderBackfillDescription = "Recorder backfill not ready yet"
+            onPresentationStateChanged?()
+            return
+        }
+
+        recorderBackfillTask?.cancel()
+        recorderBackfillTask = Task { [weak self] in
+            guard let self else { return }
+            let bins = await self.loadRecordedMotionBins(from: queryStart, to: queryEnd)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard self.isMonitoringActive || self.isMonitoringStartupInProgress else { return }
+                Task { [weak self] in
+                    guard let self else { return }
+                    let snapshot = await self.heuristicEngine.ingestRecordedMotionBins(
+                        bins,
+                        evaluatedAt: Date()
+                    )
+                    await MainActor.run {
+                        self.heuristicSnapshot = snapshot
+                        self.lastRecorderBackfillDescription = bins.isEmpty
+                            ? "No recorder bins from \(self.formatTimestamp(queryStart)) to \(self.formatTimestamp(queryEnd))"
+                            : "Loaded \(bins.count) recorder bin(s) through \(self.formatTimestamp(queryEnd))"
+                        self.recorderStatus = bins.isEmpty
+                            ? "Recorder backfill empty"
+                            : "Recorder backfill refreshed"
+                        if self.logStore.runtimeDiagnosticsEnabled {
+                            self.log(
+                                "MOTION",
+                                "Recorder backfill (\(reason)) start=\(self.formatTimestamp(queryStart)) end=\(self.formatTimestamp(queryEnd)) bins=\(bins.count)"
+                            )
+                        }
+                        self.onPresentationStateChanged?()
+                        self.checkForWakeTrigger()
+                    }
+                }
+            }
+        }
+    }
+
+    private func handleLiveMotionSample(_ sample: SmartWakeLiveMotionSample) async {
+        guard isMonitoringActive || isMonitoringStartupInProgress else { return }
+        lastLiveMotionSampleDescription = "\(String(format: "%.3f", sample.userAccelerationMagnitude)) g at \(formatTimestamp(sample.date))"
+
+        let decision = await heuristicEngine.ingestLiveMotionSample(sample)
+        applyHeuristicDecision(decision, source: "live-motion")
+    }
+
+    private func applyHeuristicDecision(
+        _ decision: SmartWakeHeuristicDecision,
+        source: String
+    ) {
+        heuristicSnapshot = decision.snapshot
+        if logStore.runtimeDiagnosticsEnabled {
+            log(
+                "HEURISTIC",
+                "\(source) confidence=\(String(format: "%.3f", decision.confidence)) motionScore=\(String(format: "%.3f", decision.motionScore)) hrFreshness=\(decision.hrFreshnessSeconds.map { String(format: "%.0fs", $0) } ?? "--") motionFreshness=\(decision.motionFreshnessSeconds.map { String(format: "%.1fs", $0) } ?? "--")"
+            )
+        }
+        onPresentationStateChanged?()
+
+        guard decision.shouldTrigger,
+              sessionState == .monitoring,
+              activeTriggerID == nil,
+              let schedule = currentSchedule else { return }
+
+        log(
+            "HEURISTIC",
+            "Trigger decision accepted from \(source): \(decision.triggerReason ?? "motion evidence threshold crossed")"
+        )
+        fireTrigger(
+            schedule: schedule,
+            confidence: decision.confidence,
+            motionScore: decision.motionScore,
+            sensorProvenance: decision.sensorProvenance,
+            fallbackMode: .earlyRamp
+        )
+    }
+
+    private func persistCurrentOccurrenceSummary(fallbackReason: String) {
+        guard let currentSchedule,
+              let wakeUpTime,
+              let windowStartTime else { return }
+
+        let capturedTriggerDate = activeTriggerDate
+        let capturedTriggerConfidence = activeTriggerConfidence
+        let capturedMotionScore = activeTriggerMotionScore
+        let capturedSensorProvenance = activeTriggerSensorProvenance
+        let capturedSnapshot = heuristicSnapshot
+        let capturedArmedAt = armedAt
+        let triggerMode: SmartWakeTriggerMode = activeTriggerDate == nil ? .exactWakeFallback : .earlyMotionTrigger
+        let provenance = capturedSensorProvenance ?? SmartWakeSensorProvenance(
+            usedLiveMotion: true,
+            usedRecordedMotionBaseline: capturedSnapshot.recorderBaselineReady,
+            usedHeartRate: capturedSnapshot.latestHeartRate != nil,
+            heartRateWasStale: (capturedSnapshot.hrFreshnessSeconds ?? .infinity) > 90,
+            triggerMode: triggerMode
+        )
+
+        Task { [weak self] in
+            guard let self else { return }
+            let summary = await self.heuristicEngine.makeOccurrenceSummary(
+                scheduleID: currentSchedule.id,
+                scheduleName: currentSchedule.name,
+                armedAt: capturedArmedAt,
+                wakeWindowStart: windowStartTime,
+                wakeUpTime: wakeUpTime,
+                triggerDate: capturedTriggerDate,
+                triggerConfidence: capturedTriggerConfidence,
+                motionScore: capturedMotionScore,
+                hrFreshnessSeconds: capturedSnapshot.hrFreshnessSeconds,
+                motionFreshnessSeconds: capturedSnapshot.motionFreshnessSeconds,
+                sensorProvenance: provenance,
+                fallbackReason: fallbackReason
+            )
+            await MainActor.run {
+                self.persistOccurrenceSummary(summary)
+            }
+        }
+    }
+
+    private func persistOccurrenceSummary(_ summary: SmartWakeOccurrenceSummary) {
+        let fileManager = FileManager.default
+        let supportURL = fileManager.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? fileManager.temporaryDirectory
+        let directoryURL = supportURL.appendingPathComponent(
+            "SmartWakeOccurrences",
+            isDirectory: true
+        )
+        try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyyMMdd-HHmmssZ"
+        let fileURL = directoryURL.appendingPathComponent(
+            "occurrence-\(formatter.string(from: summary.createdAt)).json"
+        )
+
+        do {
+            let data = try JSONEncoder().encode(summary)
+            try data.write(to: fileURL, options: .atomic)
+            lastOccurrenceSummaryStatus = "Saved \(fileURL.lastPathComponent)"
+            pruneOccurrenceSummaries(in: directoryURL)
+            onOccurrenceSummaryReady?(summary)
+            log(
+                "SESSION",
+                "Persisted Smart Wake occurrence summary \(summary.id.uuidString) fallbackReason='\(summary.fallbackReason ?? "none")'"
+            )
+        } catch {
+            lastOccurrenceSummaryStatus = "Failed to save occurrence summary"
+            log(
+                "SESSION",
+                "Failed to persist occurrence summary: \(error.localizedDescription)",
+                level: .error
+            )
+        }
+        onPresentationStateChanged?()
+    }
+
+    private func pruneOccurrenceSummaries(in directoryURL: URL) {
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        let summaries = urls
+            .filter { $0.pathExtension == "json" }
+            .sorted { lhs, rhs in
+                let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return lhsDate > rhsDate
+            }
+
+        for url in summaries.dropFirst(30) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func loadRecordedMotionBins(
+        from startDate: Date,
+        to endDate: Date
+    ) async -> [SmartWakeRecordedMotionBin] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(
+                    returning: Self.recordedMotionBins(from: startDate, to: endDate)
+                )
+            }
+        }
+    }
+
+    nonisolated private static func recordedMotionBins(
+        from startDate: Date,
+        to endDate: Date
+    ) -> [SmartWakeRecordedMotionBin] {
+        let recorder = CMSensorRecorder()
+        guard let dataList = recorder.accelerometerData(from: startDate, to: endDate) else {
+            return []
+        }
+
+        var bins: [Int64: (sum: Double, count: Int)] = [:]
+
+        var iterator = NSFastEnumerationIterator(dataList)
+        while let sample = iterator.next() as? CMRecordedAccelerometerData {
+            let magnitude = vectorMagnitude(
+                x: sample.acceleration.x,
+                y: sample.acceleration.y,
+                z: sample.acceleration.z
+            )
+            let key = Int64(floor(sample.startDate.timeIntervalSince1970))
+            var aggregate = bins[key] ?? (sum: 0, count: 0)
+            aggregate.sum += magnitude
+            aggregate.count += 1
+            bins[key] = aggregate
+        }
+
+        return bins.keys.sorted().compactMap { key in
+            guard let aggregate = bins[key], aggregate.count > 0 else { return nil }
+            return SmartWakeRecordedMotionBin(
+                secondStart: Date(timeIntervalSince1970: TimeInterval(key)),
+                averageAccelerationMagnitude: aggregate.sum / Double(aggregate.count),
+                sampleCount: aggregate.count
+            )
+        }
+    }
+
+    nonisolated private static func vectorMagnitude(x: Double, y: Double, z: Double) -> Double {
+        sqrt((x * x) + (y * y) + (z * z))
     }
 
     // MARK: - Handoff
@@ -1152,121 +1580,7 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
-    private func beginMonitoringDataFlow(
-        wakeUpTime: Date,
-        windowStartTime: Date
-    ) {
-        isMonitoringActive = true
-        isMonitoringStartupInProgress = false
-        isDegradedMode = false
-        startHeartRateQuery(from: Date(), until: wakeUpTime)
-        scheduleExactWakeTimer()
-        scheduleSeedTimeoutTimer()
-        scheduleWindowStartTimer()
-        checkForWakeTrigger()
-        startHistoricalSeed(
-            from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
-            to: historicalSeedEndDate(windowStartTime: windowStartTime)
-        )
-    }
-
-    // MARK: - Degraded Monitoring
-
-    private func startDegradedMonitoring() {
-        isMonitoringActive = true
-        isMonitoringStartupInProgress = false
-        isDegradedMode = true
-        log(
-            "SESSION",
-            "Degraded monitoring active — no workout session. Force-fire at wake time guaranteed.",
-            level: .warning
-        )
-
-        startHeartRateQuery(from: Date(), until: wakeUpTime)
-        scheduleExactWakeTimer()
-        scheduleSeedTimeoutTimer()
-        scheduleWindowStartTimer()
-
-        if let windowStartTime {
-            startHistoricalSeed(
-                from: windowStartTime.addingTimeInterval(-historicalSeedLookback),
-                to: historicalSeedEndDate(windowStartTime: windowStartTime)
-            )
-        }
-
-        checkForWakeTrigger()
-    }
-
     // MARK: - Heart Rate Query
-
-    private func historicalSeedEndDate(windowStartTime: Date) -> Date {
-        min(Date(), windowStartTime)
-    }
-
-    private func startHistoricalSeed(from startDate: Date, to endDate: Date) {
-        historicalSeedTask?.cancel()
-        log(
-            "HEALTHKIT",
-            "Starting historical heart-rate seed from \(formatTimestamp(startDate)) to \(formatTimestamp(endDate))"
-        )
-        historicalSeedTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.seedHistoricalHeartRateSamples(from: startDate, to: endDate)
-            } catch is CancellationError {
-                await MainActor.run {
-                    self.log("HEALTHKIT", "Historical heart-rate seed cancelled", level: .warning)
-                }
-                return
-            } catch {
-                await MainActor.run {
-                    self.log(
-                        "HEALTHKIT",
-                        "Historical heart-rate seed failed: \(error.localizedDescription)",
-                        level: .error
-                    )
-                }
-            }
-
-            await MainActor.run {
-                self.historicalSeedTask = nil
-            }
-        }
-    }
-
-    private func seedHistoricalHeartRateSamples(from startDate: Date, to endDate: Date) async throws {
-        let samples = try await fetchHistoricalHeartRateSamples(from: startDate, to: endDate)
-        guard isMonitoringActive || isMonitoringStartupInProgress else { return }
-
-        let uniqueSamples = samples.filter { seenSampleUUIDs.insert($0.uuid).inserted }
-        guard !uniqueSamples.isEmpty else {
-            log("HEALTHKIT", "Historical seed contained only duplicate samples", level: .warning)
-            return
-        }
-
-        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
-        let mappedSamples = uniqueSamples.map { sample in
-            (date: sample.startDate, bpm: sample.quantity.doubleValue(for: bpmUnit))
-        }
-        if let firstSample = mappedSamples.first, let lastSample = mappedSamples.last {
-            log(
-                "HEALTHKIT",
-                "Historical seed loaded \(mappedSamples.count) sample(s) spanning \(formatTimestamp(firstSample.date)) -> \(formatTimestamp(lastSample.date))"
-            )
-        } else {
-            log("HEALTHKIT", "Historical seed returned no samples", level: .warning)
-        }
-        heuristicEngine.seedHeartRateSamples(mappedSamples, referenceDate: endDate)
-        if !heuristicEngine.awaitingHistoricalSeed {
-            let maxDate = Date().addingTimeInterval(120)
-            updateLastHRSampleDate(
-                with: mappedSamples.lazy.map(\.date).filter { $0 <= maxDate }.max()
-            )
-            seedTimeoutTimer?.invalidate()
-            seedTimeoutTimer = nil
-        }
-        checkForWakeTrigger()
-    }
 
     private func fetchHistoricalHeartRateSamples(
         from startDate: Date,
@@ -1357,19 +1671,31 @@ final class SmartWakeSessionController: NSObject {
             }
 
             let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+            let orderedSamples = uniqueSamples.sorted { $0.startDate < $1.startDate }
 
-            for sample in uniqueSamples {
-                let bpm = sample.quantity.doubleValue(for: bpmUnit)
-                if self.logStore.runtimeDiagnosticsEnabled {
-                    self.log(
-                        "HEALTHKIT",
-                        "Heart-rate sample (\(source)) \(self.formatBPM(bpm)) BPM at \(self.formatTimestamp(sample.startDate))"
+            Task { [weak self] in
+                guard let self else { return }
+                var lastDecision: SmartWakeHeuristicDecision?
+
+                for sample in orderedSamples {
+                    let bpm = sample.quantity.doubleValue(for: bpmUnit)
+                    if self.logStore.runtimeDiagnosticsEnabled {
+                        self.log(
+                            "HEALTHKIT",
+                            "Heart-rate sample (\(source)) \(self.formatBPM(bpm)) BPM at \(self.formatTimestamp(sample.startDate))"
+                        )
+                    }
+                    lastDecision = await self.heuristicEngine.ingestHeartRateSample(
+                        bpm: bpm,
+                        at: sample.startDate
                     )
                 }
-                self.heuristicEngine.addHeartRateSample(bpm: bpm, date: sample.startDate)
-            }
 
-            self.checkForWakeTrigger()
+                guard let lastDecision else { return }
+                await MainActor.run {
+                    self.applyHeuristicDecision(lastDecision, source: "heart-rate")
+                }
+            }
         }
     }
 
@@ -1385,10 +1711,10 @@ final class SmartWakeSessionController: NSObject {
     private func invalidateMonitoringTimers() {
         exactWakeTimer?.invalidate()
         exactWakeTimer = nil
-        seedTimeoutTimer?.invalidate()
-        seedTimeoutTimer = nil
         windowStartTimer?.invalidate()
         windowStartTimer = nil
+        recorderRefreshTimer?.invalidate()
+        recorderRefreshTimer = nil
     }
 
     private func scheduleOneShotTimer(
@@ -1425,17 +1751,6 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
-    private func scheduleSeedTimeoutTimer() {
-        let fireDate = Date().addingTimeInterval(historicalSeedTimeout)
-        scheduleOneShotTimer(
-            \.seedTimeoutTimer,
-            fireDate: fireDate,
-            logLabel: "seed-timeout"
-        ) { controller in
-            controller.checkForWakeTrigger()
-        }
-    }
-
     private func scheduleWindowStartTimer() {
         guard let windowStartTime else { return }
         guard windowStartTime > Date() else { return }
@@ -1456,7 +1771,7 @@ final class SmartWakeSessionController: NSObject {
         guard let wakeUpTime, let currentSchedule else { return }
 
         let now = Date()
-        if now >= wakeUpTime, !heuristicEngine.hasTriggered {
+        if now >= wakeUpTime, activeTriggerID == nil {
             log(
                 "WAKE_WINDOW",
                 "Emergency force-fire at \(formatTimestamp(now)) — session loss before monitoring fully committed",
@@ -1465,6 +1780,8 @@ final class SmartWakeSessionController: NSObject {
             fireTrigger(
                 schedule: currentSchedule,
                 confidence: 1.0,
+                motionScore: heuristicSnapshot.motionScore,
+                sensorProvenance: .exactWakeFallback,
                 fallbackMode: .exactWakeFinalState
             )
         } else if isMonitoringActive {
@@ -1482,12 +1799,7 @@ final class SmartWakeSessionController: NSObject {
         deferredLightRampTask = nil
         lightRampTask?.cancel()
         lightRampTask = nil
-        activeLocalRampTriggerID = nil
-        activeTriggerID = nil
-        activeTriggerSchedule = nil
-        activeTriggerDate = nil
-        activeTriggerWakeUpTime = nil
-        activeTriggerFallbackMode = nil
+        clearTriggerContext()
         isMonitoringActive = false
         isDegradedMode = false
         sessionState = .idle
@@ -1515,7 +1827,7 @@ final class SmartWakeSessionController: NSObject {
         }
 
         if now >= wakeUpTime {
-            if !heuristicEngine.hasTriggered {
+            if activeTriggerID == nil {
                 log(
                     "WAKE_WINDOW",
                     "Reached exact wake time \(formatTimestamp(now)) without an early trigger. Forcing trigger."
@@ -1523,6 +1835,8 @@ final class SmartWakeSessionController: NSObject {
                 fireTrigger(
                     schedule: schedule,
                     confidence: 1.0,
+                    motionScore: heuristicSnapshot.motionScore,
+                    sensorProvenance: .exactWakeFallback,
                     fallbackMode: .exactWakeFinalState
                 )
             } else {
@@ -1535,29 +1849,36 @@ final class SmartWakeSessionController: NSObject {
             return
         }
 
-        if heuristicEngine.shouldTrigger(inWakeWindow: now >= windowStartTime, now: now) {
-            fireTrigger(
-                schedule: schedule,
-                confidence: heuristicEngine.currentConfidence,
-                fallbackMode: .earlyRamp
-            )
+        Task { [weak self] in
+            guard let self else { return }
+            let decision = await self.heuristicEngine.evaluate(at: now)
+            await MainActor.run {
+                self.applyHeuristicDecision(decision, source: "timer")
+            }
         }
     }
 
     private func fireTrigger(
         schedule: WatchScheduleSnapshot,
         confidence: Double,
+        motionScore: Double?,
+        sensorProvenance: SmartWakeSensorProvenance,
         fallbackMode: WatchFallbackMode
     ) {
         let triggerDate = Date()
         let triggerID = UUID()
 
-        heuristicEngine.markTriggered(at: triggerDate)
+        Task {
+            await heuristicEngine.markTriggered(at: triggerDate)
+        }
         activeTriggerID = triggerID
         activeTriggerSchedule = schedule
         activeTriggerDate = triggerDate
         activeTriggerWakeUpTime = wakeUpTime
         activeTriggerFallbackMode = fallbackMode
+        activeTriggerConfidence = confidence
+        activeTriggerMotionScore = motionScore
+        activeTriggerSensorProvenance = sensorProvenance
         didReceivePhoneHandoffAck = false
         handoffAckStatus = "Waiting for phone handoff"
         deferredLocalRampStatus = fallbackMode == .earlyRamp
@@ -1579,16 +1900,23 @@ final class SmartWakeSessionController: NSObject {
             scheduleID: schedule.id,
             triggerDate: triggerDate,
             confidence: confidence,
-            heartRateAtTrigger: heuristicEngine.latestHeartRate,
-            motionLevel: nil
+            heartRateAtTrigger: heuristicSnapshot.latestHeartRate,
+            motionLevel: heuristicSnapshot.motionEnergy60s,
+            motionScore: motionScore,
+            hrFreshnessSeconds: heuristicSnapshot.hrFreshnessSeconds,
+            motionFreshnessSeconds: heuristicSnapshot.motionFreshnessSeconds,
+            sensorProvenance: sensorProvenance
         )
 
+        persistCurrentOccurrenceSummary(
+            fallbackReason: fallbackMode == .earlyRamp ? "early trigger" : "exact wake fallback"
+        )
         onTrigger?(payload)
         finishMonitoringAfterTrigger()
 
         log(
             "TRIGGER",
-            "Trigger fired id=\(triggerID.uuidString) mode=\(describeFallbackMode(fallbackMode)) confidence=\(String(format: "%.3f", confidence)) latestHR=\(formatBPM(heuristicEngine.latestHeartRate))"
+            "Trigger fired id=\(triggerID.uuidString) mode=\(describeFallbackMode(fallbackMode)) confidence=\(String(format: "%.3f", confidence)) motionScore=\(String(format: "%.3f", motionScore ?? 0)) latestHR=\(formatBPM(heuristicSnapshot.latestHeartRate))"
         )
     }
 
@@ -1740,7 +2068,7 @@ final class SmartWakeSessionController: NSObject {
 
         noBuilderValidationSeedProbeStatus = "Running..."
         let endDate = Date()
-        let queryStart = endDate.addingTimeInterval(-historicalSeedLookback)
+        let queryStart = endDate.addingTimeInterval(-7200)
         log(
             "VALIDATION",
             "Running 2h seed probe from \(formatTimestamp(queryStart)) to \(formatTimestamp(endDate))"

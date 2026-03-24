@@ -36,12 +36,13 @@ final class WatchAppServices {
             self?.sessionController.handleLightHandoff(payload)
         }
         sessionController.onHRAccessConfirmed = { [weak self] in
-            self?.sessionManager.sendHeartRateStatus(active: true)
-            self?.refreshDerivedSmartWakeState()
+            guard let self else { return }
+            self.sessionManager.sendPermissionStatus(self.sessionController.motionStatusPayload)
+            self.refreshDerivedSmartWakeState()
         }
         sessionController.onAuthorizationChanged = { [weak self] in
             guard let self else { return }
-            self.sessionManager.sendHeartRateStatus(active: self.sessionController.hasConfirmedHRAccess)
+            self.sessionManager.sendPermissionStatus(self.sessionController.motionStatusPayload)
             self.refreshDerivedSmartWakeState()
         }
         sessionController.onPresentationStateChanged = { [weak self] in
@@ -49,6 +50,9 @@ final class WatchAppServices {
         }
         sessionController.onLogReadyToTransfer = { [weak self] url in
             self?.sessionManager.transferLogFile(url)
+        }
+        sessionController.onOccurrenceSummaryReady = { [weak self] summary in
+            self?.sessionManager.sendOccurrenceSummary(summary)
         }
         alarmScheduler.onStatusChanged = { [weak self] in
             self?.refreshDerivedSmartWakeState()
@@ -70,20 +74,16 @@ final class WatchAppServices {
         if !hasSmartWakeSchedules {
             shouldEnable = false
             reason = "No smart wake schedules"
-        } else if sessionManager.powerMode == .highReliability {
-            shouldEnable = false
-            reason = "High Reliability uses overnight workout"
         } else if !sessionController.isHealthKitAuthorized {
             shouldEnable = false
             reason = "Needs Health Access"
         } else if sessionController.isMonitoringActive
-                    || sessionController.isMonitoringStartupInProgress
-                    || sessionController.isWorkoutSessionRunning {
+                    || sessionController.isMonitoringStartupInProgress {
             shouldEnable = false
             reason = "Suspended during active monitoring"
         } else {
             shouldEnable = true
-            reason = "Balanced mode background delivery active"
+            reason = "Background HR delivery active for motion-first Smart Wake"
         }
 
         sessionController.configurePassiveHeartRateObservation(

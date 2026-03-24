@@ -8,6 +8,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var lastLightHandoff: SmartWakeLightHandoffPayload?
     private(set) var hasLoadedInitialScheduleContext = false
     private(set) var powerMode: SmartWakePowerMode = SmartWakeSharedStore.loadPowerMode()
+    private(set) var calibrationProfile: SmartWakeCalibrationProfile = SmartWakeSharedStore.loadCalibrationProfile()
 
     /// Called whenever schedules are received (including from background WCSession delivery).
     var onSchedulesUpdated: (([WatchScheduleSnapshot]) -> Void)?
@@ -74,6 +75,14 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         sendBestEffortMessage(payload, type: WCMessageKey.hapticPatternChanged)
     }
 
+    func sendOccurrenceSummary(_ summary: SmartWakeOccurrenceSummary) {
+        logStore.log(
+            "CONNECTIVITY",
+            "Sending occurrence summary \(summary.id.uuidString) for schedule \(summary.scheduleID.uuidString)"
+        )
+        sendBestEffortMessage(summary, type: WCMessageKey.smartWakeOccurrenceSummary)
+    }
+
     func sendTestTrigger(_ payload: SmartWakeTriggerPayload) {
         logStore.log(
             "CONNECTIVITY",
@@ -82,14 +91,10 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
         sendRealtimeMessage(payload, type: WCMessageKey.testTrigger)
     }
 
-    func sendHeartRateStatus(active: Bool) {
+    func sendPermissionStatus(_ status: SmartWakePermissionStatus) {
         guard let session else { return }
 
         do {
-            let status = SmartWakePermissionStatus(
-                heartRateDataActive: active,
-                watchConnected: true
-            )
             let data = try JSONEncoder().encode(status)
             let message: [String: Any] = [
                 WCMessageKey.type: WCMessageKey.permissionStatus,
@@ -115,6 +120,19 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
                 level: .error
             )
         }
+    }
+
+    func sendHeartRateStatus(active: Bool) {
+        sendPermissionStatus(
+            SmartWakePermissionStatus(
+                heartRateDataActive: active,
+                watchConnected: true,
+                motionAvailable: false,
+                motionAuthorized: false,
+                recorderAvailable: false,
+                recorderAuthorized: false
+            )
+        )
     }
 
     func transferLogFile(_ url: URL) {
@@ -300,13 +318,15 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
 
             lastProcessedSyncPayload = data
             powerMode = syncPayload.powerMode
+            calibrationProfile = syncPayload.calibrationProfile.clamped()
             SmartWakeSharedStore.savePowerMode(syncPayload.powerMode)
+            SmartWakeSharedStore.saveCalibrationProfile(syncPayload.calibrationProfile)
             activeSchedules = syncPayload.schedules
             hasLoadedInitialScheduleContext = true
             onSchedulesUpdated?(syncPayload.schedules)
             logStore.log(
                 "CONNECTIVITY",
-                "Received \(syncPayload.schedules.count) smart-wake schedule snapshot(s) from phone with powerMode=\(syncPayload.powerMode.rawValue)"
+                "Received \(syncPayload.schedules.count) smart-wake schedule snapshot(s) from phone with powerMode=\(syncPayload.powerMode.rawValue) calibrationNights=\(syncPayload.calibrationProfile.nightsConsidered)"
             )
         } catch {
             logStore.log(

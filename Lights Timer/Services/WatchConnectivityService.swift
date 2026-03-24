@@ -23,6 +23,7 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
     var onSmartWakeTrigger: ((SmartWakeTriggerPayload) -> Void)?
     var onHapticPatternChanged: ((HapticPatternChangePayload) -> Void)?
     var onTestTrigger: ((SmartWakeTriggerPayload) -> Void)?
+    var onOccurrenceSummaryReceived: ((SmartWakeOccurrenceSummary) -> Void)?
     var onWatchLogFileReceived: ((URL, [String: Any]?) -> Void)?
 
     init(logStore: PhoneLogStore) {
@@ -42,10 +43,18 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
 
     // MARK: - Send to Watch
 
-    func sendSchedules(_ snapshots: [WatchScheduleSnapshot], powerMode: SmartWakePowerMode) {
+    func sendSchedules(
+        _ snapshots: [WatchScheduleSnapshot],
+        powerMode: SmartWakePowerMode,
+        calibrationProfile: SmartWakeCalibrationProfile
+    ) {
         do {
             let data = try JSONEncoder().encode(
-                SmartWakeSyncPayload(schedules: snapshots, powerMode: powerMode)
+                SmartWakeSyncPayload(
+                    schedules: snapshots,
+                    powerMode: powerMode,
+                    calibrationProfile: calibrationProfile
+                )
             )
             cachedSchedulesContext = [
                 WCMessageKey.type: WCMessageKey.schedulesUpdated,
@@ -281,6 +290,15 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
                 onTestTrigger?(trigger)
             } else {
                 log("Failed to decode test trigger payload", level: .error)
+            }
+        case WCMessageKey.smartWakeOccurrenceSummary:
+            if let summary = try? decoder.decode(SmartWakeOccurrenceSummary.self, from: payloadData) {
+                log(
+                    "Received occurrence summary \(summary.id.uuidString) for \(summary.scheduleID)"
+                )
+                onOccurrenceSummaryReceived?(summary)
+            } else {
+                log("Failed to decode Smart Wake occurrence summary", level: .error)
             }
         default:
             log("Received unsupported watch message type '\(type)'", level: .warning)

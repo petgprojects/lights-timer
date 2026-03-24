@@ -6,6 +6,7 @@ struct SmartWakePendingWakeRecord: Codable, Equatable {
     let windowStart: Date
     let baselineStart: Date
     let scheduledSessionStart: Date
+    let armedAt: Date
     let savedAt: Date
     let isSessionScheduled: Bool
 
@@ -15,6 +16,7 @@ struct SmartWakePendingWakeRecord: Codable, Equatable {
         windowStart: Date,
         baselineStart: Date,
         scheduledSessionStart: Date,
+        armedAt: Date,
         savedAt: Date,
         isSessionScheduled: Bool = true
     ) {
@@ -23,6 +25,7 @@ struct SmartWakePendingWakeRecord: Codable, Equatable {
         self.windowStart = windowStart
         self.baselineStart = baselineStart
         self.scheduledSessionStart = scheduledSessionStart
+        self.armedAt = armedAt
         self.savedAt = savedAt
         self.isSessionScheduled = isSessionScheduled
     }
@@ -33,6 +36,7 @@ struct SmartWakePendingWakeRecord: Codable, Equatable {
         case windowStart
         case baselineStart
         case scheduledSessionStart
+        case armedAt
         case savedAt
         case isSessionScheduled
     }
@@ -44,6 +48,8 @@ struct SmartWakePendingWakeRecord: Codable, Equatable {
         windowStart = try container.decode(Date.self, forKey: .windowStart)
         baselineStart = try container.decode(Date.self, forKey: .baselineStart)
         scheduledSessionStart = try container.decode(Date.self, forKey: .scheduledSessionStart)
+        armedAt = try container.decodeIfPresent(Date.self, forKey: .armedAt)
+            ?? scheduledSessionStart
         savedAt = try container.decode(Date.self, forKey: .savedAt)
         isSessionScheduled =
             try container.decodeIfPresent(Bool.self, forKey: .isSessionScheduled) ?? true

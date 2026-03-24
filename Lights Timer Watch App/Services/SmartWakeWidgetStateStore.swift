@@ -18,6 +18,7 @@ enum SmartWakeSharedStore {
 
     private static let powerModeKey = "smartWakePowerMode"
     private static let widgetSnapshotKey = "smartWakeWidgetSnapshot"
+    private static let calibrationProfileKey = "smartWakeCalibrationProfile"
 
     static func sharedDefaults() -> UserDefaults {
         UserDefaults(suiteName: appGroupID) ?? .standard
@@ -34,6 +35,20 @@ enum SmartWakeSharedStore {
 
     static func savePowerMode(_ powerMode: SmartWakePowerMode) {
         sharedDefaults().set(powerMode.rawValue, forKey: powerModeKey)
+    }
+
+    static func loadCalibrationProfile() -> SmartWakeCalibrationProfile {
+        let defaults = sharedDefaults()
+        guard let data = defaults.data(forKey: calibrationProfileKey),
+              let profile = try? JSONDecoder().decode(SmartWakeCalibrationProfile.self, from: data) else {
+            return .default
+        }
+        return profile
+    }
+
+    static func saveCalibrationProfile(_ profile: SmartWakeCalibrationProfile) {
+        guard let data = try? JSONEncoder().encode(profile.clamped()) else { return }
+        sharedDefaults().set(data, forKey: calibrationProfileKey)
     }
 
     static func loadWidgetSnapshot() -> SmartWakeWidgetSnapshot? {
@@ -84,14 +99,7 @@ final class SmartWakeWidgetStateStore {
         case .idle:
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
-                if sessionManager.powerMode == .highReliability {
-                    let prefix = sessionController.isProactiveWorkoutRunning
-                        ? "Overnight workout active for"
-                        : "High Reliability armed for"
-                    status = ("Armed", "\(prefix) \(formatTime(wakeUpTime))")
-                } else {
-                    status = ("Armed", "Balanced mode armed for \(formatTime(wakeUpTime))")
-                }
+                status = ("Armed", "\(sessionManager.powerMode.displayName) motion-first armed for \(formatTime(wakeUpTime))")
             case .monitoringNow:
                 status = ("Monitoring", "Monitoring startup is in progress")
             case .backstopActive(let wakeUpTime):
