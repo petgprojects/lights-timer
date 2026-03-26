@@ -33,9 +33,14 @@ struct SmartWakeHeuristicSnapshot: Sendable, Equatable {
     let postureShift300s: Double
     let hrDelta: Double?
     let hrSlope180s: Double?
+    let hrTrend90s: Double
     let hrFreshnessSeconds: Double?
     let motionFreshnessSeconds: Double?
     let recorderBaselineReady: Bool
+    let runtimeHeartRateBaseline: Double?
+    let hrAvailableMode: Bool
+    let hrModeConfidence: Double
+    let motionModeConfidence: Double
     let sampleGaps: SmartWakeSampleGapSummary
     let scoreTraceSummary: SmartWakeScoreTraceSummary
     let diagnosticSummary: String
@@ -55,9 +60,14 @@ struct SmartWakeHeuristicSnapshot: Sendable, Equatable {
         postureShift300s: 0,
         hrDelta: nil,
         hrSlope180s: nil,
+        hrTrend90s: 0,
         hrFreshnessSeconds: nil,
         motionFreshnessSeconds: nil,
         recorderBaselineReady: false,
+        runtimeHeartRateBaseline: nil,
+        hrAvailableMode: false,
+        hrModeConfidence: 0,
+        motionModeConfidence: 0,
         sampleGaps: .empty,
         scoreTraceSummary: .empty,
         diagnosticSummary: "No Smart Wake data yet"
@@ -171,6 +181,13 @@ actor WakeHeuristicEngine {
     private let wakeWindowEarlyPhase: TimeInterval = 5 * 60
     private let wakeWindowFinalPhase: TimeInterval = 10 * 60
     private let wakeWindowMotionOnlyPhase: TimeInterval = 3 * 60
+
+    // Dual-mode thresholds and weights
+    private let hrAvailableFreshnessThreshold: TimeInterval = 60
+    private let hrModeBaseThreshold: Double = 0.58
+    private let motionModeBaseThreshold: Double = 0.68
+    private let strongHRArousalThreshold: Double = 0.6
+    private let strongHRMinMotionScore: Double = 0.10
 
     private var wakeWindowStart: Date?
     private var wakeUpTime: Date?
@@ -365,6 +382,7 @@ actor WakeHeuristicEngine {
         let currentSnapshot = snapshot(at: now)
         let hrFreshnessSeconds = currentSnapshot.hrFreshnessSeconds
         let motionFreshnessSeconds = currentSnapshot.motionFreshnessSeconds
+        let hrAvailable = currentSnapshot.hrAvailableMode
         let sensorProvenance = SmartWakeSensorProvenance(
             usedLiveMotion: latestMotionSampleDate != nil,
             usedRecordedMotionBaseline: currentSnapshot.recorderBaselineReady,
@@ -390,14 +408,26 @@ actor WakeHeuristicEngine {
             )
         }
 
-        let threshold = triggerThreshold(now: now)
+        // Dual-mode trigger evaluation
+        let hrThreshold = triggerThreshold(now: now, hrMode: true)
+        let motionThreshold = triggerThreshold(now: now, hrMode: false)
         let hrIsStale = (hrFreshnessSeconds ?? .infinity) > 90
         let strongMotionOnlyWindow = wakeUpTime.timeIntervalSince(now) <= wakeWindowMotionOnlyPhase
             && hrIsStale
             && currentSnapshot.motionScore >= calibrationProfile.strongMotionScore
-        let hasMotionEvidence = currentSnapshot.motionScore >= calibrationProfile.minimumMotionScore
-        let shouldTrigger = strongMotionOnlyWindow
-            || (hasMotionEvidence && currentSnapshot.currentConfidence >= threshold)
+
+        // HR-mode trigger: strong HR arousal relaxes the motion gate
+        let strongHR = hrAvailable && currentSnapshot.heartRateArousal >= strongHRArousalThreshold
+        let hrModeMinMotion = strongHR ? strongHRMinMotionScore : calibrationProfile.minimumMotionScore
+        let hrModeTrigger = hrAvailable
+            && currentSnapshot.hrModeConfidence >= hrThreshold
+            && currentSnapshot.motionScore >= hrModeMinMotion
+
+        // Motion-mode trigger: standard motion gate applies
+        let motionModeTrigger = currentSnapshot.motionModeConfidence >= motionThreshold
+            && currentSnapshot.motionScore >= calibrationProfile.minimumMotionScore
+
+        let shouldTrigger = strongMotionOnlyWindow || hrModeTrigger || motionModeTrigger
 
         return SmartWakeHeuristicDecision(
             shouldTrigger: shouldTrigger,
@@ -410,7 +440,9 @@ actor WakeHeuristicEngine {
             triggerReason: triggerReason(
                 shouldTrigger: shouldTrigger,
                 strongMotionOnlyWindow: strongMotionOnlyWindow,
-                threshold: threshold
+                hrModeTrigger: hrModeTrigger,
+                hrThreshold: hrThreshold,
+                motionThreshold: motionThreshold
             )
         )
     }
@@ -418,17 +450,23 @@ actor WakeHeuristicEngine {
     private func triggerReason(
         shouldTrigger: Bool,
         strongMotionOnlyWindow: Bool,
-        threshold: Double
+        hrModeTrigger: Bool,
+        hrThreshold: Double,
+        motionThreshold: Double
     ) -> String? {
         guard shouldTrigger else { return nil }
         if strongMotionOnlyWindow {
             return "Final 3 minutes: strong motion-only evidence with stale HR"
         }
-        return String(format: "Composite confidence crossed %.2f", threshold)
+        if hrModeTrigger {
+            return String(format: "HR-available mode: confidence crossed %.2f", hrThreshold)
+        }
+        return String(format: "Motion mode: confidence crossed %.2f", motionThreshold)
     }
 
     private func snapshot(at now: Date) -> SmartWakeHeuristicSnapshot {
-        let baselineHeartRate = calibrationProfile.sleepHeartRateBaselineBPM
+        let runtimeBaseline = runtimeHeartRateBaseline(now: now)
+        let effectiveBaseline = runtimeBaseline ?? calibrationProfile.sleepHeartRateBaselineBPM
         let baselineReady = wakeWindowStart != nil && wakeUpTime != nil
         let live60s = liveBins(inLast: 60, now: now)
         let live30s = liveBins(inLast: 30, now: now)
@@ -480,7 +518,7 @@ actor WakeHeuristicEngine {
             grace: 90,
             fullPenaltyAt: 240
         )
-        let hrDelta = latestHeartRate.map { $0 - baselineHeartRate }
+        let hrDelta = latestHeartRate.map { $0 - effectiveBaseline }
         let deltaScore = normalizedScore(max(hrDelta ?? 0, 0), reference: heartRateDeltaReference)
         let hrSlope180s = heartRateSlope(last: 180, now: now)
         let slopeScore = normalizedScore(max(hrSlope180s ?? 0, 0), reference: heartRateSlopeReference)
@@ -489,13 +527,28 @@ actor WakeHeuristicEngine {
                 - (hrFreshnessPenalty * 0.40)
         )
 
+        let hrTrend90s = heartRateTrend(now: now)
         let proximityPrior = proximityPrior(now: now)
-        let currentConfidence = clamp(
-            0.55 * motionArousal
-                + 0.20 * stillnessBreakScore
-                + 0.20 * heartRateArousal
-                + 0.05 * proximityPrior
+        let hrAvailable = (hrFreshnessSeconds ?? .infinity) <= hrAvailableFreshnessThreshold
+            && latestHeartRateSampleDate != nil
+
+        // HR-available mode: HR is the primary wake signal, trend rewards sustained rise
+        let hrModeConfidence = clamp(
+            0.20 * motionArousal
+                + 0.05 * stillnessBreakScore
+                + 0.55 * heartRateArousal
+                + 0.10 * hrTrend90s
+                + 0.10 * proximityPrior
         )
+        // Motion-only mode: motion must carry the decision
+        let motionModeConfidence = clamp(
+            0.65 * motionArousal
+                + 0.25 * stillnessBreakScore
+                + 0.10 * proximityPrior
+        )
+        let currentConfidence = hrAvailable
+            ? max(hrModeConfidence, motionModeConfidence)
+            : motionModeConfidence
 
         var nextScoreTrace = scoreTrace
         nextScoreTrace.record(
@@ -508,7 +561,7 @@ actor WakeHeuristicEngine {
 
         return SmartWakeHeuristicSnapshot(
             latestHeartRate: latestHeartRate,
-            baselineHeartRate: baselineReady ? baselineHeartRate : nil,
+            baselineHeartRate: baselineReady ? effectiveBaseline : nil,
             baselineReady: baselineReady,
             baselineSampleCount: calibrationProfile.nightsConsidered,
             currentConfidence: currentConfidence,
@@ -521,9 +574,14 @@ actor WakeHeuristicEngine {
             postureShift300s: postureShift300s,
             hrDelta: hrDelta,
             hrSlope180s: hrSlope180s,
+            hrTrend90s: hrTrend90s,
             hrFreshnessSeconds: hrFreshnessSeconds,
             motionFreshnessSeconds: motionFreshnessSeconds,
             recorderBaselineReady: recorderBaselineReady,
+            runtimeHeartRateBaseline: runtimeBaseline,
+            hrAvailableMode: hrAvailable,
+            hrModeConfidence: hrModeConfidence,
+            motionModeConfidence: motionModeConfidence,
             sampleGaps: SmartWakeSampleGapSummary(
                 longestHeartRateGapSeconds: longestHeartRateGapSeconds,
                 heartRateGapEventsOver90Seconds: heartRateGapEventsOver90Seconds,
@@ -537,8 +595,10 @@ actor WakeHeuristicEngine {
                 motionScore: motionScore,
                 stillnessBreakScore: stillnessBreakScore,
                 heartRateArousal: heartRateArousal,
+                hrTrend90s: hrTrend90s,
                 hrFreshnessSeconds: hrFreshnessSeconds,
-                motionFreshnessSeconds: motionFreshnessSeconds
+                motionFreshnessSeconds: motionFreshnessSeconds,
+                hrAvailableMode: hrAvailable
             )
         )
     }
@@ -706,6 +766,38 @@ actor WakeHeuristicEngine {
         return ((totalWeight * sumXY) - (sumX * sumY)) / denominator
     }
 
+    private func runtimeHeartRateBaseline(now: Date) -> Double? {
+        guard let wakeWindowStart else { return nil }
+        // Use HR samples from the first 5 minutes of the wake window as the
+        // sleeping baseline — before the user is likely to be waking up
+        let baselineCutoff = wakeWindowStart.addingTimeInterval(5 * 60)
+        let baselineSamples = heartRateSamples.filter {
+            $0.date < min(baselineCutoff, now)
+        }
+        guard baselineSamples.count >= 3 else { return nil }
+        return median(baselineSamples.map(\.bpm))
+    }
+
+    /// Sustained upward HR trend over the last 90 seconds.
+    /// Compares the average HR in the most recent 30s to the prior 60s.
+    /// Returns 0–1: 0 = no rise or declining, 1 = strong sustained climb.
+    private func heartRateTrend(now: Date) -> Double {
+        let windowEnd = now
+        let windowStart = now.addingTimeInterval(-90)
+        let midpoint = now.addingTimeInterval(-30)
+
+        let recentSamples = heartRateSamples.filter { $0.date >= midpoint && $0.date <= windowEnd }
+        let olderSamples = heartRateSamples.filter { $0.date >= windowStart && $0.date < midpoint }
+
+        guard recentSamples.count >= 2, olderSamples.count >= 2 else { return 0 }
+
+        let recentAvg = recentSamples.map(\.bpm).reduce(0, +) / Double(recentSamples.count)
+        let olderAvg = olderSamples.map(\.bpm).reduce(0, +) / Double(olderSamples.count)
+
+        let rise = max(recentAvg - olderAvg, 0)
+        return min(rise / 10.0, 1.0) // 10 BPM average rise over the period = max trend
+    }
+
     private func proximityPrior(now: Date) -> Double {
         guard let wakeWindowStart, let wakeUpTime else { return 0 }
         let totalWindow = max(wakeUpTime.timeIntervalSince(wakeWindowStart), 1)
@@ -713,12 +805,13 @@ actor WakeHeuristicEngine {
         return clamp(pow(max(0, elapsed) / totalWindow, 1.15))
     }
 
-    private func triggerThreshold(now: Date) -> Double {
+    private func triggerThreshold(now: Date, hrMode: Bool) -> Double {
         guard let wakeWindowStart, let wakeUpTime else { return 1.0 }
 
         let elapsed = now.timeIntervalSince(wakeWindowStart)
         let timeUntilWake = wakeUpTime.timeIntervalSince(now)
-        var threshold = 0.72 + calibrationProfile.motionTriggerThresholdOffset
+        let baseThreshold = hrMode ? hrModeBaseThreshold : motionModeBaseThreshold
+        var threshold = baseThreshold + calibrationProfile.motionTriggerThresholdOffset
 
         if elapsed < wakeWindowEarlyPhase {
             threshold += calibrationProfile.earlyWindowThresholdOffset
@@ -727,7 +820,7 @@ actor WakeHeuristicEngine {
             threshold += calibrationProfile.finalWindowThresholdOffset
         }
 
-        return clamp(threshold, lower: 0.55, upper: 0.95)
+        return clamp(threshold, lower: 0.45, upper: 0.95)
     }
 
     private func freshnessPenalty(
@@ -745,12 +838,15 @@ actor WakeHeuristicEngine {
         motionScore: Double,
         stillnessBreakScore: Double,
         heartRateArousal: Double,
+        hrTrend90s: Double,
         hrFreshnessSeconds: Double?,
-        motionFreshnessSeconds: Double?
+        motionFreshnessSeconds: Double?,
+        hrAvailableMode: Bool
     ) -> String {
         let hrGap = hrFreshnessSeconds.map { String(format: "%.0fs", $0) } ?? "--"
         let motionGap = motionFreshnessSeconds.map { String(format: "%.1fs", $0) } ?? "--"
-        return "Conf \(Int((confidence * 100).rounded()))% | Motion \(format(motionScore)) | Still \(format(stillnessBreakScore)) | HR \(format(heartRateArousal)) | HR gap \(hrGap) | Motion gap \(motionGap)"
+        let mode = hrAvailableMode ? "HR" : "Motion"
+        return "[\(mode)] Conf \(Int((confidence * 100).rounded()))% | Motion \(format(motionScore)) | Still \(format(stillnessBreakScore)) | HR \(format(heartRateArousal)) | Trend \(format(hrTrend90s)) | HR gap \(hrGap) | Motion gap \(motionGap)"
     }
 
     private func normalizedScore(_ value: Double, reference: Double) -> Double {
