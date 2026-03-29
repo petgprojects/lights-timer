@@ -557,6 +557,12 @@ final class SmartAlarmScheduler: NSObject {
 
     func onAppForeground() {
         isSceneActive = true
+
+        // Defensive: if the session controller isn't actively monitoring but
+        // CoreMotion is still delivering updates (e.g., watchOS suspended the
+        // process after trigger teardown and resumed it now), stop them.
+        sessionController.ensureFullyTornDown()
+
         logStore.log("SCHEDULER", "App returned to foreground — re-evaluating schedules")
         schedulesDidUpdate(sessionManager.activeSchedules)
     }
@@ -643,6 +649,11 @@ final class SmartAlarmScheduler: NSObject {
     /// Fully resets scheduler state so the next wake can be scheduled cleanly.
     private func cleanUpAfterCompletedWake() {
         logStore.log("SCHEDULER", "Post-trigger work complete — cleaning up scheduler state")
+
+        // Defensive: ensure motion/HR/timers are fully stopped.
+        // If watchOS suspended the process after the trigger teardown,
+        // CoreMotion may resume delivering updates when the app resumes.
+        sessionController.ensureFullyTornDown()
 
         let sessionToInvalidate = extendedSession
         if let sessionToInvalidate,
@@ -890,16 +901,18 @@ final class SmartAlarmScheduler: NSObject {
             calibrationProfile: sessionManager.calibrationProfile
         )
 
-        Task {
-            await sessionController.startMonitoring(
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let didStartMonitoring = await self.sessionController.startMonitoring(
                 schedule: schedule,
                 wakeUpTime: wakeUpTime,
                 armedAt: effectiveArmedAt,
-                calibrationProfile: sessionManager.calibrationProfile
+                calibrationProfile: self.sessionManager.calibrationProfile
             )
-            logStore.log(
+            guard didStartMonitoring else { return }
+            self.logStore.log(
                 "SCHEDULER",
-                "Motion-first monitoring started for '\(schedule.name)' with haptic=\(sessionController.hapticPatternType.displayName)"
+                "Motion-first monitoring started for '\(schedule.name)' with haptic=\(self.sessionController.hapticPatternType.displayName)"
             )
         }
     }

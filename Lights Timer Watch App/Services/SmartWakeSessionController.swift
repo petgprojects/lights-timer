@@ -120,6 +120,7 @@ final class SmartWakeSessionController: NSObject {
     private var currentCalibrationProfile: SmartWakeCalibrationProfile = SmartWakeSharedStore.loadCalibrationProfile()
     private var preparedWakeSignature: String?
     private var didArmRecorderForPreparedWake = false
+    private var monitoringRunToken = UUID()
 
     // Haptic alarm
     private var hapticTimer: Timer?
@@ -138,6 +139,7 @@ final class SmartWakeSessionController: NSObject {
     private let workoutRecoveryRetryDelay: TimeInterval = 8
     private let workoutRecoveryRetryValidationDelay: TimeInterval = 3
     private let maxWorkoutRecoveryRetryAttempts = 2
+    private let postTriggerWorkTimeout: TimeInterval = 180
     private var seenSampleUUIDs = Set<UUID>()
     private var isPassiveObservationEnabled = false
 
@@ -534,6 +536,33 @@ final class SmartWakeSessionController: NSObject {
         onPresentationStateChanged?()
     }
 
+    private func beginMonitoringRun() -> UUID {
+        let monitoringRunToken = UUID()
+        self.monitoringRunToken = monitoringRunToken
+        return monitoringRunToken
+    }
+
+    private func invalidateMonitoringRun() {
+        monitoringRunToken = UUID()
+    }
+
+    private func isCurrentMonitoringRun(
+        _ monitoringRunToken: UUID,
+        allowStartup: Bool = false
+    ) -> Bool {
+        guard self.monitoringRunToken == monitoringRunToken else { return false }
+        if allowStartup {
+            return isMonitoringActive || isMonitoringStartupInProgress
+        }
+        return isMonitoringActive
+    }
+
+    private var shouldStopHapticsDuringDefensiveTeardown: Bool {
+        guard sessionState == .triggered else { return true }
+        guard let activeTriggerDate else { return false }
+        return Date().timeIntervalSince(activeTriggerDate) > postTriggerWorkTimeout
+    }
+
     // MARK: - Session Lifecycle
 
     func prepareArmedWake(
@@ -561,12 +590,13 @@ final class SmartWakeSessionController: NSObject {
         didArmRecorderForPreparedWake = didArmRecorder
     }
 
+    @discardableResult
     func startMonitoring(
         schedule: WatchScheduleSnapshot,
         wakeUpTime: Date,
         armedAt: Date?,
         calibrationProfile: SmartWakeCalibrationProfile
-    ) async {
+    ) async -> Bool {
         #if DEBUG
         guard !isNoBuilderValidationActive else {
             log(
@@ -574,13 +604,13 @@ final class SmartWakeSessionController: NSObject {
                 "Ignoring startMonitoring for '\(schedule.name)' while no-builder validation is active",
                 level: .warning
             )
-            return
+            return false
         }
         #endif
 
         guard !isMonitoringActive, !isMonitoringStartupInProgress else {
             log("SESSION", "Ignoring duplicate startMonitoring for '\(schedule.name)'")
-            return
+            return false
         }
 
         let windowStartTime = wakeUpTime.addingTimeInterval(
@@ -605,22 +635,35 @@ final class SmartWakeSessionController: NSObject {
         resetWorkoutRecoveryRetryState()
         lastHRSampleDate = nil
         didLogWakeWindowStart = false
-        heuristicSnapshot = await heuristicEngine.configure(
-            wakeWindowStart: windowStartTime,
-            wakeUpTime: wakeUpTime,
-            calibrationProfile: currentCalibrationProfile
-        )
-        seenSampleUUIDs.removeAll()
+
+        // Set flags BEFORE the first await to prevent a race where two concurrent
+        // startMonitoring() Tasks both pass the guard (the await suspends the main
+        // actor, letting the second Task enter before flags are set).
+        let monitoringRunToken = beginMonitoringRun()
+        isMonitoringStartupInProgress = true
+        isMonitoringActive = true
+        isDegradedMode = false
+        sessionState = .monitoring
 
         log(
             "SESSION",
             "Starting motion-first monitoring for '\(schedule.name)' wake=\(formatTimestamp(wakeUpTime)) windowStart=\(formatTimestamp(windowStartTime)) armedAt=\(formatTimestamp(effectiveArmedAt)) haptic=\(hapticPatternType.displayName)"
         )
 
-        isMonitoringStartupInProgress = true
-        isMonitoringActive = true
-        isDegradedMode = false
-        sessionState = .monitoring
+        heuristicSnapshot = await heuristicEngine.configure(
+            wakeWindowStart: windowStartTime,
+            wakeUpTime: wakeUpTime,
+            calibrationProfile: currentCalibrationProfile
+        )
+        guard isCurrentMonitoringRun(monitoringRunToken, allowStartup: true),
+              sessionState == .monitoring else {
+            log(
+                "SESSION",
+                "Discarding stale monitoring startup for '\(schedule.name)' before sensors were armed"
+            )
+            return false
+        }
+        seenSampleUUIDs.removeAll()
         notifyStateChange()
 
         startHeartRateQuery(from: Date(), until: wakeUpTime)
@@ -630,6 +673,15 @@ final class SmartWakeSessionController: NSObject {
         scheduleRecorderRefreshTimer()
         await refreshRecorderBackfill(reason: "session-start")
 
+        guard isCurrentMonitoringRun(monitoringRunToken, allowStartup: true),
+              sessionState == .monitoring else {
+            log(
+                "SESSION",
+                "Monitoring startup for '\(schedule.name)' was cancelled before activation completed"
+            )
+            return false
+        }
+
         isMonitoringStartupInProgress = false
         notifyStateChange()
         checkForWakeTrigger()
@@ -638,6 +690,7 @@ final class SmartWakeSessionController: NSObject {
             "SESSION",
             "Motion-first monitoring active for '\(schedule.name)'. motionAvailable=\(motionManager.isDeviceMotionAvailable) recorderStatus='\(recorderStatus)'"
         )
+        return true
     }
 
     func finishMonitoringAfterTrigger() {
@@ -677,9 +730,8 @@ final class SmartWakeSessionController: NSObject {
         // Poll until haptics, deferred handoff, and light ramp are all done.
         // Haptics: max 60s. Deferred handoff: 8s. Light ramp: ~60s after that.
         // Worst case total: ~130s. Poll interval kept short to avoid unnecessary delay.
-        let maxWait: TimeInterval = 180
         let pollInterval: TimeInterval = 2
-        let deadline = Date().addingTimeInterval(maxWait)
+        let deadline = Date().addingTimeInterval(postTriggerWorkTimeout)
 
         while Date() < deadline {
             let done = await MainActor.run {
@@ -689,7 +741,19 @@ final class SmartWakeSessionController: NSObject {
             try? await Task.sleep(for: .seconds(pollInterval))
         }
         await MainActor.run {
-            log("SESSION", "Post-trigger work wait timed out after \(Int(maxWait))s — proceeding with cleanup", level: .warning)
+            log("SESSION", "Post-trigger work wait timed out after \(Int(postTriggerWorkTimeout))s — proceeding with cleanup", level: .warning)
+        }
+    }
+
+    /// Defensive cleanup: ensures motion/HR/timers are stopped even if prior
+    /// teardown was incomplete (e.g., watchOS suspended the process before
+    /// stopDeviceMotionUpdates() took full effect). Safe to call when monitoring
+    /// is not expected to be active.
+    func ensureFullyTornDown() {
+        guard !isMonitoringActive, sessionState != .monitoring else { return }
+        tearDownMonitoringSession()
+        if shouldStopHapticsDuringDefensiveTeardown {
+            stopHaptics()
         }
     }
 
@@ -755,6 +819,7 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func tearDownMonitoringSession() {
+        invalidateMonitoringRun()
         invalidateMonitoringTimers()
         stopLiveMotionUpdates()
         recorderBackfillTask?.cancel()
@@ -860,6 +925,7 @@ final class SmartWakeSessionController: NSObject {
     }
 
     private func startLiveMotionUpdates() {
+        let monitoringRunToken = self.monitoringRunToken
         refreshMotionCapabilityStatus()
         guard motionManager.isDeviceMotionAvailable else {
             motionStatus = "Live motion unavailable"
@@ -873,14 +939,16 @@ final class SmartWakeSessionController: NSObject {
         motionManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, error in
             if let error {
                 Task { @MainActor [weak self] in
-                    self?.motionStatus = "Motion error: \(error.localizedDescription)"
-                    self?.isDegradedMode = true
-                    self?.log(
+                    guard let self,
+                          self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
+                    self.motionStatus = "Motion error: \(error.localizedDescription)"
+                    self.isDegradedMode = true
+                    self.log(
                         "MOTION",
                         "Device motion update failed: \(error.localizedDescription)",
                         level: .warning
                     )
-                    self?.onPresentationStateChanged?()
+                    self.onPresentationStateChanged?()
                 }
                 return
             }
@@ -907,7 +975,7 @@ final class SmartWakeSessionController: NSObject {
             )
 
             Task { @MainActor [weak self] in
-                await self?.handleLiveMotionSample(sample)
+                await self?.handleLiveMotionSample(sample, monitoringRunToken: monitoringRunToken)
             }
         }
 
@@ -924,12 +992,15 @@ final class SmartWakeSessionController: NSObject {
 
     private func scheduleRecorderRefreshTimer() {
         recorderRefreshTimer?.invalidate()
+        let monitoringRunToken = self.monitoringRunToken
         let timer = Timer.scheduledTimer(
             withTimeInterval: recorderRefreshInterval,
             repeats: true
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.refreshRecorderBackfill(reason: "periodic-refresh")
+                guard let self,
+                      self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
+                await self.refreshRecorderBackfill(reason: "periodic-refresh")
             }
         }
         recorderRefreshTimer = timer
@@ -937,6 +1008,7 @@ final class SmartWakeSessionController: NSObject {
 
     private func refreshRecorderBackfill(reason: String) async {
         guard let windowStartTime, let wakeUpTime else { return }
+        let monitoringRunToken = self.monitoringRunToken
 
         let queryStart = max(
             armedAt ?? windowStartTime.addingTimeInterval(-recorderLookback),
@@ -959,7 +1031,7 @@ final class SmartWakeSessionController: NSObject {
             let bins = await self.loadRecordedMotionBins(from: queryStart, to: queryEnd)
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                guard self.isMonitoringActive || self.isMonitoringStartupInProgress else { return }
+                guard self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
                 Task { [weak self] in
                     guard let self else { return }
                     let snapshot = await self.heuristicEngine.ingestRecordedMotionBins(
@@ -967,6 +1039,7 @@ final class SmartWakeSessionController: NSObject {
                         evaluatedAt: Date()
                     )
                     await MainActor.run {
+                        guard self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
                         self.heuristicSnapshot = snapshot
                         self.lastRecorderBackfillDescription = bins.isEmpty
                             ? "No recorder bins from \(self.formatTimestamp(queryStart)) to \(self.formatTimestamp(queryEnd))"
@@ -988,11 +1061,16 @@ final class SmartWakeSessionController: NSObject {
         }
     }
 
-    private func handleLiveMotionSample(_ sample: SmartWakeLiveMotionSample) async {
-        guard isMonitoringActive || isMonitoringStartupInProgress else { return }
+    private func handleLiveMotionSample(
+        _ sample: SmartWakeLiveMotionSample,
+        monitoringRunToken: UUID
+    ) async {
+        guard isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
         lastLiveMotionSampleDescription = "\(String(format: "%.3f", sample.userAccelerationMagnitude)) g at \(formatTimestamp(sample.date))"
 
         let decision = await heuristicEngine.ingestLiveMotionSample(sample)
+        // Re-check after await — monitoring may have stopped while the heuristic was processing
+        guard isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
         applyHeuristicDecision(decision, source: "live-motion")
     }
 
@@ -1610,6 +1688,7 @@ final class SmartWakeSessionController: NSObject {
 
     private func startHeartRateQuery(from startDate: Date, until endDate: Date?) {
         let heartRateType = HKQuantityType(.heartRate)
+        let monitoringRunToken = self.monitoringRunToken
         stopHeartRateQuery()
         let queryEndDate = endDate.map { max(startDate.addingTimeInterval(300), $0.addingTimeInterval(300)) }
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: queryEndDate)
@@ -1624,18 +1703,30 @@ final class SmartWakeSessionController: NSObject {
             anchor: nil,
             limit: HKObjectQueryNoLimit
         ) { [weak self] _, samples, _, _, _ in
-            self?.processHeartRateSamples(samples, source: "initial-query")
+            self?.processHeartRateSamples(
+                samples,
+                source: "initial-query",
+                monitoringRunToken: monitoringRunToken
+            )
         }
 
         query.updateHandler = { [weak self] _, samples, _, _, _ in
-            self?.processHeartRateSamples(samples, source: "live")
+            self?.processHeartRateSamples(
+                samples,
+                source: "live",
+                monitoringRunToken: monitoringRunToken
+            )
         }
 
         healthStore.execute(query)
         heartRateQuery = query
     }
 
-    nonisolated private func processHeartRateSamples(_ samples: [HKSample]?, source: String) {
+    nonisolated private func processHeartRateSamples(
+        _ samples: [HKSample]?,
+        source: String,
+        monitoringRunToken: UUID
+    ) {
         guard let samples = samples as? [HKQuantitySample], !samples.isEmpty else { return }
 
         Task { @MainActor in
@@ -1647,7 +1738,7 @@ final class SmartWakeSessionController: NSObject {
             }
             #endif
 
-            guard self.isMonitoringActive || self.isMonitoringStartupInProgress else { return }
+            guard self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
 
             let maxDate = Date().addingTimeInterval(120)
             let timelySamples = samples.filter { $0.startDate <= maxDate }
@@ -1693,6 +1784,7 @@ final class SmartWakeSessionController: NSObject {
 
                 guard let lastDecision else { return }
                 await MainActor.run {
+                    guard self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
                     self.applyHeuristicDecision(lastDecision, source: "heart-rate")
                 }
             }
@@ -1724,6 +1816,7 @@ final class SmartWakeSessionController: NSObject {
         action: @escaping (SmartWakeSessionController) -> Void
     ) {
         self[keyPath: keyPath]?.invalidate()
+        let monitoringRunToken = self.monitoringRunToken
 
         let interval = max(0, fireDate.timeIntervalSinceNow)
         log(
@@ -1732,7 +1825,8 @@ final class SmartWakeSessionController: NSObject {
         )
         let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self,
+                      self.isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
                 self[keyPath: keyPath] = nil
                 action(self)
             }
@@ -1849,10 +1943,12 @@ final class SmartWakeSessionController: NSObject {
             return
         }
 
+        let monitoringRunToken = self.monitoringRunToken
         Task { [weak self] in
             guard let self else { return }
             let decision = await self.heuristicEngine.evaluate(at: now)
             await MainActor.run {
+                guard self.isCurrentMonitoringRun(monitoringRunToken) else { return }
                 self.applyHeuristicDecision(decision, source: "timer")
             }
         }

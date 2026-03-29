@@ -17,6 +17,18 @@ struct SmartWakeLogFile: Identifiable, Hashable, Sendable {
     var sizeDescription: String {
         ByteCountFormatter.string(fromByteCount: sizeInBytes, countStyle: .file)
     }
+
+    var isRuntimeLog: Bool {
+        fileName == "smartwake-runtime.log"
+    }
+
+    var isRuntimeArchive: Bool {
+        fileName.hasPrefix("smartwake-runtime-") && fileName.hasSuffix(".log")
+    }
+
+    var isSessionLog: Bool {
+        !isRuntimeLog && !isRuntimeArchive
+    }
 }
 
 extension SmartWakeLogFile: Transferable {
@@ -66,6 +78,7 @@ final class SmartWakeLogStore {
     private let transferSnapshotRetentionInterval: TimeInterval = 7 * 24 * 60 * 60
     private let retainedLogLimit = 14
     private let runtimeLogFileName = "smartwake-runtime.log"
+    private let archivedRuntimeLogPrefix = "smartwake-runtime-"
     private let runtimeDiagnosticsKey = "smartWakeRuntimeDiagnosticsEnabled"
 
     private var activeSessionKey: String?
@@ -101,6 +114,7 @@ final class SmartWakeLogStore {
         ensureLogsDirectory()
         ensureTransferSnapshotsDirectory()
         pruneTransferSnapshots()
+        ensureRuntimeLogExists()
         refreshAvailableLogs()
         log("APP", "SmartWakeLogStore initialized")
     }
@@ -110,7 +124,7 @@ final class SmartWakeLogStore {
     }
 
     var latestSessionLog: SmartWakeLogFile? {
-        availableLogs.first(where: { $0.fileName != runtimeLogFileName })
+        availableLogs.first(where: \.isSessionLog)
     }
 
     func prepareSessionLog(
@@ -172,6 +186,7 @@ final class SmartWakeLogStore {
     }
 
     func log(_ category: String, _ message: String, level: SmartWakeLogLevel = .info) {
+        ensureRuntimeLogExists()
         let line = makeLogLine(category: category, message: message, level: level)
         let runtimeURL = logsDirectoryURL.appendingPathComponent(runtimeLogFileName)
         write(line, to: runtimeURL, append: true)
@@ -182,6 +197,53 @@ final class SmartWakeLogStore {
 
         print(line, terminator: "")
         logsDirty = true
+    }
+
+    @discardableResult
+    func clearRuntimeLog() -> SmartWakeLogFile? {
+        ensureLogsDirectory()
+
+        let clearedAt = Date()
+        let runtimeURL = logsDirectoryURL.appendingPathComponent(runtimeLogFileName)
+        var archivedLogFile: SmartWakeLogFile?
+
+        if fileManager.fileExists(atPath: runtimeURL.path) {
+            let archivedURL = uniqueLogURL(for: makeArchivedRuntimeFileName(clearedAt: clearedAt))
+
+            do {
+                try fileManager.moveItem(at: runtimeURL, to: archivedURL)
+                archivedLogFile = makeLogFile(from: archivedURL)
+            } catch {
+                log(
+                    "APP",
+                    "Failed to archive runtime log before clearing: \(error.localizedDescription)",
+                    level: .error
+                )
+                return nil
+            }
+        }
+
+        write(runtimeLogHeader(createdAt: clearedAt), to: runtimeURL, append: false)
+
+        let resetMessage: String
+        if let archivedLogFile {
+            resetMessage = "Started a fresh runtime log after archiving \(archivedLogFile.fileName)"
+        } else {
+            resetMessage = "Started a fresh runtime log"
+        }
+
+        let resetLine = makeLogLine(category: "APP", message: resetMessage, level: .info)
+        write(resetLine, to: runtimeURL, append: true)
+        print(resetLine, terminator: "")
+
+        logsDirty = true
+        refreshAvailableLogs(selecting: runtimeURL)
+
+        if let archivedURL = archivedLogFile?.url {
+            pruneLogsIfNeeded(excluding: archivedURL)
+        }
+
+        return archivedLogFile
     }
 
     func latestLogContents() -> String {
@@ -318,6 +380,12 @@ final class SmartWakeLogStore {
         )
     }
 
+    private func ensureRuntimeLogExists() {
+        let runtimeURL = logsDirectoryURL.appendingPathComponent(runtimeLogFileName)
+        guard !fileManager.fileExists(atPath: runtimeURL.path) else { return }
+        write(runtimeLogHeader(createdAt: Date()), to: runtimeURL, append: false)
+    }
+
     private func pruneTransferSnapshots() {
         let snapshotURLs = (try? fileManager.contentsOfDirectory(
             at: transferSnapshotsDirectoryURL,
@@ -378,11 +446,57 @@ final class SmartWakeLogStore {
         "\(scheduleID.uuidString)-\(fileTimestampFormatter.string(from: wakeUpTime))"
     }
 
+    private func makeArchivedRuntimeFileName(clearedAt: Date) -> String {
+        "\(archivedRuntimeLogPrefix)\(fileTimestampFormatter.string(from: clearedAt)).log"
+    }
+
     private func makeFileName(schedule: WatchScheduleSnapshot, wakeUpTime: Date) -> String {
         let timestamp = fileTimestampFormatter.string(from: wakeUpTime)
         let safeName = sanitizedFileComponent(schedule.name)
         let shortID = schedule.id.uuidString.prefix(8)
         return "smartwake-\(timestamp)-\(safeName)-\(shortID).log"
+    }
+
+    private func uniqueLogURL(for fileName: String) -> URL {
+        var candidateURL = logsDirectoryURL.appendingPathComponent(fileName)
+        guard fileManager.fileExists(atPath: candidateURL.path) else { return candidateURL }
+
+        let baseName = (fileName as NSString).deletingPathExtension
+        let fileExtension = (fileName as NSString).pathExtension
+        var suffix = 1
+
+        repeat {
+            let suffixedName = "\(baseName)-\(suffix).\(fileExtension)"
+            candidateURL = logsDirectoryURL.appendingPathComponent(suffixedName)
+            suffix += 1
+        } while fileManager.fileExists(atPath: candidateURL.path)
+
+        return candidateURL
+    }
+
+    private func runtimeLogHeader(createdAt: Date) -> String {
+        [
+            "# Lights Timer Watch Runtime Log",
+            "Created: \(formatTimestamp(createdAt))",
+            "App Version: \(appVersionDescription())",
+            ""
+        ].joined(separator: "\n")
+    }
+
+    private func appVersionDescription() -> String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        switch (version, build) {
+        case let (version?, build?):
+            return "\(version) (\(build))"
+        case let (version?, nil):
+            return version
+        case let (nil, build?):
+            return build
+        case (nil, nil):
+            return "Unknown"
+        }
     }
 
     private func sanitizedFileComponent(_ string: String) -> String {

@@ -4,6 +4,7 @@ struct WatchLogArchiveView: View {
     @Binding var path: [WatchRootDestination]
     @Environment(SmartWakeLogStore.self) private var logStore
     @Environment(WatchSessionManager.self) private var sessionManager
+    @State private var isConfirmingRuntimeLogClear = false
 
     var body: some View {
         List {
@@ -20,6 +21,19 @@ struct WatchLogArchiveView: View {
         }
         .onAppear {
             logStore.refreshAvailableLogsIfNeeded()
+        }
+        .confirmationDialog(
+            "Clear Runtime Log?",
+            isPresented: $isConfirmingRuntimeLogClear,
+            titleVisibility: .visible
+        ) {
+            Button("Archive And Clear", role: .destructive) {
+                logStore.clearRuntimeLog()
+            }
+
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The current runtime log will be saved with a timestamped name and a fresh smartwake-runtime.log will start immediately.")
         }
     }
 
@@ -40,6 +54,12 @@ struct WatchLogArchiveView: View {
                     sessionManager.transferLogFile(runtimeLog.url)
                 } label: {
                     Label("Send Runtime Log To iPhone", systemImage: "iphone")
+                }
+
+                Button(role: .destructive) {
+                    isConfirmingRuntimeLogClear = true
+                } label: {
+                    Label("Clear Runtime Log", systemImage: "trash")
                 }
             } else {
                 Text("No watch logs yet")
@@ -76,7 +96,7 @@ struct WatchLogArchiveView: View {
     }
 
     private var archiveSection: some View {
-        Section("Saved Session Logs") {
+        Section("Saved Logs") {
             if logStore.availableLogs.isEmpty {
                 Text("No watch logs yet")
                     .foregroundStyle(.secondary)

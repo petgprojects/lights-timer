@@ -102,7 +102,7 @@ Models/
 Views/
   ChunkedLogTextView.swift         Chunked lazy log renderer for large on-watch log files
   WatchRootView.swift              Status + scheduler arming truth, power-mode summary, schedule list, diagnostics (including auto-launch status, passive-HR status, motion/recorder authorization and freshness, heuristic snapshot telemetry, occurrence-summary status, and the debug-only no-builder workout validation controls), overnight ambient UI during monitoring, permission prompt, and log export shortcuts
-  WatchLogArchiveView.swift        Watch-side viewer/share UI for the always-on runtime log plus saved smart-wake session logs
+  WatchLogArchiveView.swift        Watch-side viewer/share UI for the always-on runtime log, manual runtime-log archive/clear action, and saved smart-wake logs
 
 Services/
   WatchAppServices.swift           @MainActor singleton that owns the shared watch service graph for SwiftUI, the extension delegate, passive-HR observer-query configuration, watch permission-status publishing, occurrence-summary forwarding, and widget snapshot refreshes
@@ -112,7 +112,7 @@ Services/
   SmartAlarmScheduler.swift        @Observable NSObject, `WKExtendedRuntimeSession` manager that persists the owned upcoming wake (including `armedAt`) plus inactive-app foreground-rearm placeholders, prepares overnight recorder capture while foregrounded, preserves `armedAt` into the monitoring transition so recorder backfill keeps the overnight baseline, recovers sessions after process relaunch, refreshes auto-launch status, tracks scene-phase-backed true foreground state, and starts the motion-first monitoring window when the alarm session begins
   SmartWakePendingWakeStore.swift  UserDefaults wrapper for the persisted pending wake record (including whether a real extended runtime session was scheduled and when it was armed) plus auto-launch authorization flags/state
   WakeHeuristicEngine.swift        Actor-backed multi-signal wake engine with 1-second motion bins, 5s/30s/60s/180s rolling windows, recorder-derived sleep-motion baseline, time-aware HR windows, composite confidence scoring, and occurrence-summary trace generation
-  SmartWakeLogStore.swift          @Observable, persists an always-on watch runtime log plus per-session smart-wake log files in Application Support, lazily refreshes log metadata, tracks export status, and stores a runtime diagnostics flag available in non-debug builds
+  SmartWakeLogStore.swift          @Observable, persists an always-on watch runtime log plus per-session smart-wake log files in Application Support, can rotate the runtime log into `smartwake-runtime-<timestamp>.log`, lazily refreshes log metadata, tracks export status, and stores a runtime diagnostics flag available in non-debug builds
   SmartWakeWidgetStateStore.swift  Builds a compact Smart Wake status snapshot, writes it into the shared app-group defaults, persists the latest calibration profile for the watch service graph, and reloads WidgetKit timelines after scheduler/session changes
 
 Lights_Timer_Watch.entitlements    HealthKit + HealthKit background delivery + HomeKit + shared app group
@@ -257,9 +257,9 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 - Updated profiles are synced back to watch via the normal `SmartWakeSyncPayload` path. If summaries or iPhone Health permissions are missing, Smart Wake keeps using the default calibration profile.
 
 ### Persistent Smart Wake Logs
-- `SmartWakeLogStore` writes to Application Support: `smartwake-runtime.log` (always-on) + one per-session log per wake occurrence. ISO-8601 timestamps, mirrored to Xcode console.
-- Retains up to 14 session logs. Runtime diagnostics toggle controls verbose per-sample logs.
-- `WatchRootView` exposes log viewing, sharing, and iPhone transfer. `WatchSessionManager.transferLogFile` snapshots to a staging directory before `WCSession.transferFile`.
+- `SmartWakeLogStore` writes to Application Support: `smartwake-runtime.log` (always-on) + one per-session log per wake occurrence. Manual clears rotate the live runtime log into `smartwake-runtime-<timestamp>.log` before immediately starting a fresh `smartwake-runtime.log`. ISO-8601 timestamps are mirrored to Xcode console.
+- Retains up to 14 archived watch logs (session logs plus cleared runtime snapshots). Runtime diagnostics toggle controls verbose per-sample logs.
+- `WatchRootView` exposes log viewing, sharing, runtime-log clearing, and iPhone transfer. `WatchSessionManager.transferLogFile` snapshots to a staging directory before `WCSession.transferFile`.
 - `WatchLogArchiveService` stores incoming files on iPhone; `WatchLogArchiveView` for reading/sharing.
 
 ### Persistent iPhone Logs
