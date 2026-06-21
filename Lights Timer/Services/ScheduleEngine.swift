@@ -27,11 +27,6 @@ final class ScheduleEngine {
         let saturation: Double
     }
 
-    private struct WeeklyTimerFireDate {
-        let wakeDay: DayOfWeek
-        let fireDate: Date
-    }
-
     let homeKitService: HomeKitService
     private let lightController: LightController
     private let logStore: PhoneLogStore
@@ -534,7 +529,7 @@ final class ScheduleEngine {
                     guard let wakeUpTime = nextOccurrence(for: schedule) else { continue }
                     if wakeUpTime > now { totalSteps += 1 }
                 } else {
-                    totalSteps += schedule.leadTimeMinutes * schedule.activeDays.count
+                    totalSteps += schedule.leadTimeMinutes
                 }
             }
             syncStepsTotal = totalSteps
@@ -663,8 +658,8 @@ final class ScheduleEngine {
         }
 
         // Normal schedules: create gradual ramp scenes spaced 1 minute apart.
-        // Each scene gets one weekly timer trigger per selected alarm weekday,
-        // so HomeKit owns every selected repeat day without a watch or foreground app.
+        // Each scene gets one calendar-event trigger containing every selected weekday,
+        // so HomeKit owns every repeat day without a watch or foreground app.
         let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
         let startTime = wakeUpTime.addingTimeInterval(-leadSeconds)
         let stepCount = schedule.leadTimeMinutes
@@ -674,7 +669,7 @@ final class ScheduleEngine {
         for step in 1...stepCount {
             let progress = Double(step) / Double(stepCount)
             let minuteOffsetFromWake = -schedule.leadTimeMinutes + (step - 1)
-            let weeklyFireDates = weeklyTimerFireDates(
+            let weeklyFireDates = weeklyEventFireDates(
                 for: schedule,
                 minuteOffsetFromWake: minuteOffsetFromWake
             )
@@ -753,43 +748,91 @@ final class ScheduleEngine {
                     }
                 }
 
-                // 3. Create one weekly timer trigger per selected alarm weekday.
-                for weeklyFireDate in weeklyFireDates {
-                    let triggerName = "LT_\(shortID)_\(weeklyFireDate.wakeDay.rawValue)_\(step)"
+                // 3. Match the native Home time-automation representation: one
+                // hour/minute-only calendar event with all firing weekdays attached.
+                guard let firstFireDate = weeklyFireDates.first else {
                     do {
-                        var recurrence = DateComponents()
-                        recurrence.day = 7
-
-                        let trigger = HMTimerTrigger(
-                            name: triggerName,
-                            fireDate: weeklyFireDate.fireDate,
-                            recurrence: recurrence
+                        try await removeActionSet(actionSet, from: home)
+                        log(
+                            "Removed orphaned scene \(sceneName) because it has no fire dates",
+                            level: .error
                         )
-
-                        try await addTrigger(trigger, to: home)
-                        try await addActionSetToTrigger(actionSet, trigger: trigger)
-                        try await enableTrigger(trigger)
-
-                        syncStepsCompleted += 1
                     } catch {
-                        log("Failed to create trigger \(triggerName): \(error)", level: .error)
-                        syncStepsCompleted += 1
+                        log(
+                            "Failed to remove orphaned scene \(sceneName): \(error)",
+                            level: .error
+                        )
                     }
+                    syncStepsCompleted += 1
+                    continue
+                }
+
+                let calendar = Calendar.current
+                var fireDateComponents = DateComponents()
+                fireDateComponents.hour = calendar.component(.hour, from: firstFireDate)
+                fireDateComponents.minute = calendar.component(.minute, from: firstFireDate)
+
+                let recurrences = weeklyFireDates.map { fireDate -> DateComponents in
+                    var components = DateComponents()
+                    components.weekday = calendar.component(.weekday, from: fireDate)
+                    return components
+                }
+
+                let calendarEvent = HMCalendarEvent(fire: fireDateComponents)
+                let trigger = HMEventTrigger(
+                    name: sceneName,
+                    events: [calendarEvent],
+                    end: nil,
+                    recurrences: recurrences,
+                    predicate: nil
+                )
+
+                var triggerWasAdded = false
+                do {
+                    try await addTrigger(trigger, to: home)
+                    triggerWasAdded = true
+                    try await addActionSetToTrigger(actionSet, trigger: trigger)
+                    try await updateExecuteOnce(false, for: trigger)
+                    try await enableTrigger(trigger)
+                    syncStepsCompleted += 1
+                } catch {
+                    if triggerWasAdded {
+                        do {
+                            try await removeTrigger(trigger, from: home)
+                        } catch {
+                            log(
+                                "Failed to roll back trigger \(sceneName): \(error)",
+                                level: .error
+                            )
+                        }
+                    }
+
+                    do {
+                        try await removeActionSet(actionSet, from: home)
+                    } catch {
+                        log(
+                            "Failed to remove orphaned scene \(sceneName): \(error)",
+                            level: .error
+                        )
+                    }
+
+                    log("Failed to create trigger \(sceneName): \(error)", level: .error)
+                    syncStepsCompleted += 1
                 }
             } catch {
                 log("Failed to create scene \(sceneName): \(error)", level: .error)
-                syncStepsCompleted += max(weeklyFireDates.count, 1)
+                syncStepsCompleted += 1
             }
         }
 
         log("Finished creating scenes for '\(schedule.name)'")
     }
 
-    private func weeklyTimerFireDates(
+    private func weeklyEventFireDates(
         for schedule: LightSchedule,
         minuteOffsetFromWake: Int,
         now: Date = Date()
-    ) -> [WeeklyTimerFireDate] {
+    ) -> [Date] {
         schedule.activeDays
             .sorted(by: { $0.rawValue < $1.rawValue })
             .compactMap { wakeDay in
@@ -807,7 +850,7 @@ final class ScheduleEngine {
                     fireDate = nextWeekFireDate
                 }
 
-                return WeeklyTimerFireDate(wakeDay: wakeDay, fireDate: fireDate)
+                return fireDate
             }
     }
 
@@ -876,7 +919,7 @@ final class ScheduleEngine {
                 .compactMap { $0.weekday.flatMap(DayOfWeek.init(rawValue:))?.shortName }
                 .joined(separator: ",") ?? "none"
 
-            return "\(trigger.name) type=HMEventTrigger \(enabled) activation=\(formatActivationState(eventTrigger.triggerActivationState)) events=\(eventDescriptions) recurrences=\(recurrences) actionSets=\(actionSets)"
+            return "\(trigger.name) type=HMEventTrigger \(enabled) activation=\(formatActivationState(eventTrigger.triggerActivationState)) executeOnce=\(eventTrigger.executeOnce) events=\(eventDescriptions) recurrences=\(recurrences) actionSets=\(actionSets)"
         }
 
         if let timerTrigger = trigger as? HMTimerTrigger {
@@ -1025,6 +1068,15 @@ final class ScheduleEngine {
     private func enableTrigger(_ trigger: HMTrigger) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             trigger.enable(true) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func updateExecuteOnce(_ executeOnce: Bool, for trigger: HMEventTrigger) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            trigger.updateExecuteOnce(executeOnce) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }

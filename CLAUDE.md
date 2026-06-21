@@ -227,7 +227,7 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 ## Domain Workflows
 
 ### Normal Wake (usesSmartWake == false)
-1. **Background**: `syncBackgroundScenes` creates one `HMActionSet` scene per minute step, named `LT_<shortID>_<step>`, and one weekly `HMTimerTrigger` per selected alarm weekday attached to each scene, named `LT_<shortID>_<weekday>_<step>`. Fires on the HomeKit hub regardless of app state.
+1. **Background**: `syncBackgroundScenes` creates one `HMActionSet` scene and one `HMEventTrigger` per minute step, both named `LT_<shortID>_<step>`. Each trigger matches Home's native time-automation representation: an `HMCalendarEvent` containing only local hour/minute, all selected actual firing weekdays in `recurrences`, and `executeOnce = false`. This produces one visible Home automation per ramp step with the selected Repeat days. Trigger setup is transactional; failures remove partial triggers and orphaned scenes.
 2. **Foreground**: `checkForActiveSchedules` detects in-progress window, starts 15-second `Timer.publish` for smooth direct writes via `LightController.applyToMultipleLights`. Smart wake schedules are **skipped** — they only trigger via the watch.
 3. Progress calculated as `elapsed / total`, brightness and color interpolated linearly.
 4. **Adaptive Lighting mode**: When `skipColorWrites` is true (either start or end color set to Adaptive), all hue/saturation writes are skipped in both foreground execution and background scenes. Only brightness + power are written, so HomeKit Adaptive Lighting on the bulb is not overridden. `LightController.applyToMultipleLights` accepts a `skipColor` parameter. The `ColorPreferenceView` shows per-color Adaptive toggles; when toggled, the color picker is hidden and the gradient preview shows a warm-to-cool approximation.
@@ -319,7 +319,7 @@ Files placed in `Lights Timer/` automatically belong to the iOS target. Files in
 - `HMActionSet` scenes spaced 1 minute apart minimum (closer intervals "get weird").
 - Scene/trigger names prefixed with `LT_<8-char-UUID>_<step>` for cleanup.
 - `HMCharacteristicWriteAction` is generic — pass as `HMAction` to `addAction`.
-- Normal repeated schedules use weekly recurring `HMTimerTrigger`s, one per selected alarm weekday and ramp step. The trigger's `fireDate` is anchored to the next matching ramp-step occurrence and `recurrence.day = 7`.
+- Normal repeated schedules use `HMEventTrigger` + `HMCalendarEvent`, one per ramp step. Calendar-event components must contain only hour/minute (no calendar or time-zone metadata), recurrence components contain actual firing weekdays, and `executeOnce` is explicitly disabled. This mirrors automations created by the Home app and preserves pre-midnight day rollover.
 - `HMActionSet()` has no public init — use `home.addActionSet(withName:)`.
 - Async HomeKit wrappers use `withCheckedThrowingContinuation` over callback APIs.
 - iPhone direct `HMCharacteristic.writeValue` calls can fail from background wakeups (`HMErrorDomain Code=80`). Smart wake therefore prefers watch-local HomeKit writes when the watch can handle the selected accessories.
