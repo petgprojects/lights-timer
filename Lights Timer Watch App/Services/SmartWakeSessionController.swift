@@ -94,6 +94,7 @@ final class SmartWakeSessionController: NSObject {
     private var heartRateQuery: HKAnchoredObjectQuery?
     private var passiveHeartRateObserverQuery: HKObserverQuery?
     private var exactWakeTimer: Timer?
+    private var exactWakeWatchdogTask: Task<Void, Never>?
     private var windowStartTimer: Timer?
     private var recorderRefreshTimer: Timer?
     private var recorderBackfillTask: Task<Void, Never>?
@@ -1087,6 +1088,8 @@ final class SmartWakeSessionController: NSObject {
         }
         onPresentationStateChanged?()
 
+        guard !forceExactWakeIfNeeded(triggerSource: source) else { return }
+
         guard decision.shouldTrigger,
               sessionState == .monitoring,
               activeTriggerID == nil,
@@ -1803,6 +1806,8 @@ final class SmartWakeSessionController: NSObject {
     private func invalidateMonitoringTimers() {
         exactWakeTimer?.invalidate()
         exactWakeTimer = nil
+        exactWakeWatchdogTask?.cancel()
+        exactWakeWatchdogTask = nil
         windowStartTimer?.invalidate()
         windowStartTimer = nil
         recorderRefreshTimer?.invalidate()
@@ -1843,6 +1848,7 @@ final class SmartWakeSessionController: NSObject {
         ) { controller in
             controller.checkForWakeTrigger()
         }
+        scheduleExactWakeWatchdog(fireDate: wakeUpTime)
     }
 
     private func scheduleWindowStartTimer() {
@@ -1856,6 +1862,63 @@ final class SmartWakeSessionController: NSObject {
         ) { controller in
             controller.checkForWakeTrigger()
         }
+    }
+
+    private func scheduleExactWakeWatchdog(fireDate: Date) {
+        exactWakeWatchdogTask?.cancel()
+
+        let monitoringRunToken = self.monitoringRunToken
+        let interval = max(0, fireDate.timeIntervalSinceNow)
+        log(
+            "SESSION",
+            "Scheduling exact-wake watchdog for \(formatTimestamp(fireDate)) (in \(formatInterval(interval)))"
+        )
+
+        exactWakeWatchdogTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(interval))
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+            await self?.handleExactWakeWatchdogFire(monitoringRunToken: monitoringRunToken)
+        }
+    }
+
+    private func handleExactWakeWatchdogFire(monitoringRunToken: UUID) {
+        guard isCurrentMonitoringRun(monitoringRunToken, allowStartup: true) else { return }
+        log(
+            "WAKE_WINDOW",
+            "Exact-wake watchdog fired at \(formatTimestamp(Date()))"
+        )
+        checkForWakeTrigger()
+    }
+
+    @discardableResult
+    private func forceExactWakeIfNeeded(triggerSource: String) -> Bool {
+        guard isMonitoringActive,
+              sessionState == .monitoring,
+              activeTriggerID == nil,
+              let wakeUpTime,
+              let schedule = currentSchedule else { return false }
+
+        let now = Date()
+        guard now >= wakeUpTime else { return false }
+
+        log(
+            "WAKE_WINDOW",
+            "Exact wake enforcement fell back to \(triggerSource) at \(formatTimestamp(now)); forcing trigger because the scheduled wake-time timer did not complete on time",
+            level: .warning
+        )
+        fireTrigger(
+            schedule: schedule,
+            confidence: 1.0,
+            motionScore: heuristicSnapshot.motionScore,
+            sensorProvenance: .exactWakeFallback,
+            fallbackMode: .exactWakeFinalState
+        )
+        return true
     }
 
     /// Called by the scheduler when the extended runtime session is about to

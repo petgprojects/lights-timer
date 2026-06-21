@@ -27,6 +27,11 @@ final class ScheduleEngine {
         let saturation: Double
     }
 
+    private struct WeeklyTimerFireDate {
+        let wakeDay: DayOfWeek
+        let fireDate: Date
+    }
+
     let homeKitService: HomeKitService
     private let lightController: LightController
     private let logStore: PhoneLogStore
@@ -478,9 +483,9 @@ final class ScheduleEngine {
         )
     }
 
-    // MARK: - Background Scenes (HMActionSet + HMTimerTrigger)
+    // MARK: - Background Scenes (HMActionSet + HomeKit Triggers)
 
-    /// Creates HomeKit scenes and timer triggers for background execution.
+    /// Creates HomeKit scenes and triggers for background execution.
     /// Each scene sets all target lights to a specific brightness/color step.
     /// Scenes are spaced 1 minute apart (the minimum reliable interval per the user).
     func syncBackgroundScenes(modelContext: ModelContext) async {
@@ -523,16 +528,13 @@ final class ScheduleEngine {
             var totalSteps = 0
             for schedule in schedules {
                 guard !schedule.lightIdentifiers.isEmpty,
-                      let wakeUpTime = nextOccurrence(for: schedule) else { continue }
+                      !schedule.activeDays.isEmpty else { continue }
                 if schedule.usesSmartWake {
                     // Smart wake: single fallback scene at wake time
+                    guard let wakeUpTime = nextOccurrence(for: schedule) else { continue }
                     if wakeUpTime > now { totalSteps += 1 }
                 } else {
-                    let startTime = wakeUpTime.addingTimeInterval(-TimeInterval(schedule.leadTimeMinutes * 60))
-                    for step in 1...schedule.leadTimeMinutes {
-                        let fireDate = startTime.addingTimeInterval(Double(step - 1) * 60.0)
-                        if fireDate > now { totalSteps += 1 }
-                    }
+                    totalSteps += schedule.leadTimeMinutes * schedule.activeDays.count
                 }
             }
             syncStepsTotal = totalSteps
@@ -543,6 +545,7 @@ final class ScheduleEngine {
 
             lastBackgroundSyncSucceededAt = Date()
             lastBackgroundSyncError = nil
+            logHomeKitTriggerAudit()
             log("Finished background scene sync")
         } catch {
             lastBackgroundSyncError = error.localizedDescription
@@ -645,7 +648,7 @@ final class ScheduleEngine {
                     }
                 }
 
-                let trigger = HMTimerTrigger(name: sceneName, fireDate: wakeUpTime, timeZone: .current, recurrence: nil, recurrenceCalendar: nil)
+                let trigger = HMTimerTrigger(name: sceneName, fireDate: wakeUpTime, recurrence: nil)
                 try await addTrigger(trigger, to: home)
                 try await addActionSetToTrigger(actionSet, trigger: trigger)
                 try await enableTrigger(trigger)
@@ -659,20 +662,22 @@ final class ScheduleEngine {
             return
         }
 
-        // Normal schedules: create gradual ramp scenes spaced 1 minute apart
+        // Normal schedules: create gradual ramp scenes spaced 1 minute apart.
+        // Each scene gets one weekly timer trigger per selected alarm weekday,
+        // so HomeKit owns every selected repeat day without a watch or foreground app.
         let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
         let startTime = wakeUpTime.addingTimeInterval(-leadSeconds)
         let stepCount = schedule.leadTimeMinutes
-        let now = Date()
 
         log("Creating \(stepCount) scenes for '\(schedule.name)' starting at \(formatTimestamp(startTime))")
 
         for step in 1...stepCount {
             let progress = Double(step) / Double(stepCount)
-            let fireDate = startTime.addingTimeInterval(Double(step - 1) * 60.0)
-
-            // Skip steps that are already in the past
-            guard fireDate > now else { continue }
+            let minuteOffsetFromWake = -schedule.leadTimeMinutes + (step - 1)
+            let weeklyFireDates = weeklyTimerFireDates(
+                for: schedule,
+                minuteOffsetFromWake: minuteOffsetFromWake
+            )
 
             let brightness = interpolateBrightness(
                 target: schedule.targetBrightness,
@@ -748,27 +753,171 @@ final class ScheduleEngine {
                     }
                 }
 
-                // 3. Create a timer trigger for this scene
-                let trigger = HMTimerTrigger(
-                    name: sceneName,
-                    fireDate: fireDate,
-                    timeZone: .current,
-                    recurrence: nil,
-                    recurrenceCalendar: nil
-                )
+                // 3. Create one weekly timer trigger per selected alarm weekday.
+                for weeklyFireDate in weeklyFireDates {
+                    let triggerName = "LT_\(shortID)_\(weeklyFireDate.wakeDay.rawValue)_\(step)"
+                    do {
+                        var recurrence = DateComponents()
+                        recurrence.day = 7
 
-                try await addTrigger(trigger, to: home)
-                try await addActionSetToTrigger(actionSet, trigger: trigger)
-                try await enableTrigger(trigger)
+                        let trigger = HMTimerTrigger(
+                            name: triggerName,
+                            fireDate: weeklyFireDate.fireDate,
+                            recurrence: recurrence
+                        )
 
-                syncStepsCompleted += 1
+                        try await addTrigger(trigger, to: home)
+                        try await addActionSetToTrigger(actionSet, trigger: trigger)
+                        try await enableTrigger(trigger)
+
+                        syncStepsCompleted += 1
+                    } catch {
+                        log("Failed to create trigger \(triggerName): \(error)", level: .error)
+                        syncStepsCompleted += 1
+                    }
+                }
             } catch {
                 log("Failed to create scene \(sceneName): \(error)", level: .error)
-                syncStepsCompleted += 1
+                syncStepsCompleted += max(weeklyFireDates.count, 1)
             }
         }
 
         log("Finished creating scenes for '\(schedule.name)'")
+    }
+
+    private func weeklyTimerFireDates(
+        for schedule: LightSchedule,
+        minuteOffsetFromWake: Int,
+        now: Date = Date()
+    ) -> [WeeklyTimerFireDate] {
+        schedule.activeDays
+            .sorted(by: { $0.rawValue < $1.rawValue })
+            .compactMap { wakeDay in
+                guard let wakeDate = nextWakeDate(schedule: schedule, on: wakeDay, after: now) else {
+                    return nil
+                }
+
+                var fireDate = wakeDate.addingTimeInterval(TimeInterval(minuteOffsetFromWake * 60))
+                if fireDate <= now.addingTimeInterval(60) {
+                    guard let nextWeekFireDate = Calendar.current.date(
+                        byAdding: .day,
+                        value: 7,
+                        to: fireDate
+                    ) else { return nil }
+                    fireDate = nextWeekFireDate
+                }
+
+                return WeeklyTimerFireDate(wakeDay: wakeDay, fireDate: fireDate)
+            }
+    }
+
+    private func nextWakeDate(
+        schedule: LightSchedule,
+        on wakeDay: DayOfWeek,
+        after date: Date
+    ) -> Date? {
+        let calendar = Calendar.current
+
+        for dayOffset in 0..<8 {
+            guard let candidateDate = calendar.date(byAdding: .day, value: dayOffset, to: date) else {
+                continue
+            }
+
+            guard calendar.component(.weekday, from: candidateDate) == wakeDay.rawValue else {
+                continue
+            }
+
+            var components = calendar.dateComponents([.year, .month, .day], from: candidateDate)
+            components.hour = schedule.wakeUpHour
+            components.minute = schedule.wakeUpMinute
+            components.second = 0
+
+            guard let wakeDate = calendar.date(from: components) else { continue }
+            if wakeDate > date {
+                return wakeDate
+            }
+        }
+
+        return nil
+    }
+
+    private func logHomeKitTriggerAudit() {
+        for home in homeKitService.homes {
+            let lightsTimerTriggers = home.triggers
+                .filter { $0.name.hasPrefix("LT_") }
+                .sorted(by: { $0.name < $1.name })
+
+            let lightsTimerScenes = home.actionSets
+                .filter { $0.name.hasPrefix("LT_") }
+
+            log(
+                "HomeKit audit for '\(home.name)': LT triggers=\(lightsTimerTriggers.count), LT scenes=\(lightsTimerScenes.count)"
+            )
+
+            for trigger in lightsTimerTriggers {
+                log("HomeKit audit trigger: \(triggerAuditDescription(trigger))")
+            }
+        }
+    }
+
+    private func triggerAuditDescription(_ trigger: HMTrigger) -> String {
+        let enabled = trigger.isEnabled ? "enabled" : "disabled"
+        let actionSetNames = trigger.actionSets.map(\.name).joined(separator: ",")
+        let actionSets = actionSetNames.isEmpty ? "none" : actionSetNames
+
+        if let eventTrigger = trigger as? HMEventTrigger {
+            let eventDescriptions = eventTrigger.events.map { event -> String in
+                if let calendarEvent = event as? HMCalendarEvent {
+                    return formatCalendarEvent(calendarEvent)
+                }
+                return String(describing: type(of: event))
+            }.joined(separator: ",")
+            let recurrences = eventTrigger.recurrences?
+                .compactMap { $0.weekday.flatMap(DayOfWeek.init(rawValue:))?.shortName }
+                .joined(separator: ",") ?? "none"
+
+            return "\(trigger.name) type=HMEventTrigger \(enabled) activation=\(formatActivationState(eventTrigger.triggerActivationState)) events=\(eventDescriptions) recurrences=\(recurrences) actionSets=\(actionSets)"
+        }
+
+        if let timerTrigger = trigger as? HMTimerTrigger {
+            let recurrence = timerTrigger.recurrence.map(formatRecurrence) ?? "none"
+            return "\(trigger.name) type=HMTimerTrigger \(enabled) fireDate=\(formatTimestamp(timerTrigger.fireDate)) recurrence=\(recurrence) actionSets=\(actionSets)"
+        }
+
+        return "\(trigger.name) type=\(type(of: trigger)) \(enabled) actionSets=\(actionSets)"
+    }
+
+    private func formatCalendarEvent(_ event: HMCalendarEvent) -> String {
+        let components = event.fireDateComponents
+        let hour = components.hour.map(String.init) ?? "--"
+        let minute = components.minute.map { String(format: "%02d", $0) } ?? "--"
+        return "calendar=\(hour):\(minute)"
+    }
+
+    private func formatRecurrence(_ components: DateComponents) -> String {
+        var parts: [String] = []
+        if let day = components.day { parts.append("\(day)d") }
+        if let hour = components.hour { parts.append("\(hour)h") }
+        if let minute = components.minute { parts.append("\(minute)m") }
+        if let second = components.second { parts.append("\(second)s") }
+        return parts.isEmpty ? "\(components)" : parts.joined(separator: " ")
+    }
+
+    private func formatActivationState(_ state: HMEventTriggerActivationState) -> String {
+        switch state {
+        case .disabled:
+            return "disabled"
+        case .disabledNoHomeHub:
+            return "disabledNoHomeHub"
+        case .disabledNoCompatibleHomeHub:
+            return "disabledNoCompatibleHomeHub"
+        case .disabledNoLocationServicesAuthorization:
+            return "disabledNoLocationServicesAuthorization"
+        case .enabled:
+            return "enabled"
+        @unknown default:
+            return "unknown(\(state.rawValue))"
+        }
     }
 
     // MARK: - Helpers
@@ -832,7 +981,7 @@ final class ScheduleEngine {
         }
     }
 
-    private func addTrigger(_ trigger: HMTimerTrigger, to home: HMHome) async throws {
+    private func addTrigger(_ trigger: HMTrigger, to home: HMHome) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             home.addTrigger(trigger) { error in
                 if let error { continuation.resume(throwing: error) }
