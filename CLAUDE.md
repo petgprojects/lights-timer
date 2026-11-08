@@ -57,15 +57,16 @@ ContentView.swift                  Root view, scenePhase lifecycle, trigger proc
 
 Models/
   DayOfWeek.swift                  Enum: Sun=1..Sat=7, Codable, letter/shortName
-  LightSchedule.swift              @Model: SwiftData entity, all schedule fields + smart wake fields
+  LightSchedule.swift              @Model: SwiftData entity, schedule fields + one-day override state + smart wake fields
   WatchScheduleSnapshot.swift      Codable mirror of LightSchedule for WCSession transfer
   SmartWakeMessage.swift           Codable message types + WCMessageKey constants + HapticPattern enum + SmartWakePowerMode / SmartWakeSyncPayload + SmartWakeCalibrationProfile + enriched trigger/occurrence payloads
 
 Views/
   ChunkedLogTextView.swift         Chunked lazy log renderer for large iPhone/watch-imported log files
-  ScheduleListView.swift           Schedule list, enable toggle, smart wake badge, debug trigger (swipe right), toolbar entry points for add + settings
+  ScheduleListView.swift           Schedule list, enable toggle, one-day override status/action, smart wake badge, debug trigger (swipe right), toolbar entry points for add + settings
   SettingsView.swift               iPhone settings screen with Smart Wake power-mode selection, calibration Health access/status, and collapsible Phone Logs / Watch Logs / Smart Wake Debug sections
   ScheduleDetailView.swift         Schedule editor form, smart wake toggle + window stepper + haptic pattern picker
+  OneDayOverrideView.swift         Next-occurrence-only wake-time override editor with cancel/replace controls
   DayOfWeekSelector.swift          Circular day-of-week picker
   LightPickerView.swift            HomeKit light multi-select
   ColorPreferenceView.swift        Start/end color pickers + gradient preview
@@ -76,7 +77,7 @@ Services/
   HomeKitService.swift             @Observable NSObject, HMHomeManagerDelegate, light discovery + characteristic writes + onHomesUpdated retry hook + phone-side HomeKit runtime logging
   LightController.swift            @Observable, multi-light batch writes via HomeKitService + best-effort write summaries + persisted failure logging
   PhoneLogStore.swift              @Observable, persists an always-on iPhone runtime log plus per-launch log files in Application Support, mirrors app-generated phone logs to disk and console, and exposes metadata for in-app viewing/sharing
-  ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HomeKit trigger scenes + smart wake ownership-commit ramp execution + HomeKit retry debug state + persisted phone logging for ramp/scene decisions
+  ScheduleEngine.swift             @Observable, foreground timer execution + background HMActionSet/HomeKit trigger scenes + one-day replacement triggers/foreground restoration + smart wake ownership-commit ramp execution + HomeKit retry debug state + persisted phone logging for ramp/scene decisions
   WatchConnectivityService.swift   @Observable NSObject, WCSessionDelegate (iPhone side), caches the latest SmartWakeSyncPayload app-context payload (schedules + power mode + calibration profile), suppresses unchanged resends, retries after activation/watch-state changes, sends light-handoff acks, receives watch occurrence summaries, stages transferred watch log files immediately for import, and logs WCSession state/messages
   SmartWakeCoordinator.swift       @Observable, validates fresh watch triggers against the matching occurrence, keeps bounded handoff dedupe, decides phone vs watch light ownership, syncs schedules + SmartWakePowerMode + SmartWakeCalibrationProfile to watch, and logs trigger/handoff decisions to phone files
   SmartWakeCalibrationService.swift  @Observable, requests iPhone HealthKit read access for post-hoc Smart Wake calibration, stores imported watch occurrence summaries, computes a bounded EMA calibration profile from sleep/vitals labels plus overnight heart-rate baseline, dampens per-night tuning when optional overnight vitals deviate from the user baseline, persists it in Application Support, and notifies the coordinator when the profile changes
@@ -148,16 +149,18 @@ Lights-Timer-Widgets-Info.plist    Root-level widget Info.plist kept outside the
 | isEnabled | Bool | Active toggle |
 | lightIdentifiers | [String] | HomeKit accessory UUID strings |
 | lightNames | [String] | Display names (parallel array) |
+| oneDayOverrideOriginalWakeDate | Date? | Normal next occurrence replaced by a one-day change |
+| oneDayOverrideWakeDate | Date? | Replacement wake time on that occurrence's calendar day |
 | usesSmartWake | Bool | Smart Wake enabled for this schedule |
 | smartWakeWindowMinutes | Int | Smart wake window (default 25) |
 | hapticPatternRaw | String | Haptic pattern for watch alarm ("gentle"/"pulse"/"heartbeat"/"alarm"/"critical") |
 | lastSmartWakeTriggerAt | Date? | Last smart wake fire time |
 | createdAt | Date | Creation timestamp |
 
-Computed: `activeDays: Set<DayOfWeek>`, `wakeUpTimeString`, `activeDaysSummary`, `skipColorWrites: Bool` (true when either color is adaptive)
+Computed/helpers: `activeDays: Set<DayOfWeek>`, `wakeUpTimeString`, `activeDaysSummary`, `activeOneDayOverride`, `nextBaseOccurrence(after:)`, `skipColorWrites: Bool` (true when either color is adaptive)
 
 ### WatchScheduleSnapshot (Codable, Equatable)
-Lightweight mirror of LightSchedule for WCSession transfer. Contains: id, name, wakeUpHour/Minute, activeDaysRaw, leadTimeMinutes, usesSmartWake, smartWakeWindowMinutes, targetBrightness, startColorHue/Sat/Bri, endColorHue/Sat/Bri, skipColorWrites, lightIdentifiers, lightNames, hapticPatternRaw. iPhone copy has `init(from: LightSchedule)` extension.
+Lightweight mirror of LightSchedule for WCSession transfer. Contains: id, name, wakeUpHour/Minute, activeDaysRaw, oneDayOverrideOriginalWakeDate, oneDayOverrideWakeDate, leadTimeMinutes, usesSmartWake, smartWakeWindowMinutes, targetBrightness, startColorHue/Sat/Bri, endColorHue/Sat/Bri, skipColorWrites, lightIdentifiers, lightNames, hapticPatternRaw. iPhone copy has `init(from: LightSchedule)` extension.
 
 ### SmartWakeTriggerPayload (Codable)
 Watch→iPhone trigger: triggerID, scheduleID, triggerDate, confidence, heartRateAtTrigger?, motionLevel?, motionScore, hrFreshnessSeconds, motionFreshnessSeconds, sensorProvenance, lightsHandledOnWatch? (`lightsHandledOnWatch` remains test-mode only)
@@ -226,8 +229,15 @@ WatchAppServices.shared.alarmScheduler.attachRecoveredExtendedRuntimeSession(_)
 
 ## Domain Workflows
 
+### One-Day Wake-Time Change
+1. Swipe right on a schedule and choose **Change Next**. `OneDayOverrideView` fixes the change to that schedule's next normal occurrence and lets the user choose a replacement time on the same day.
+2. The model stores both the original normal occurrence and the replacement time. The schedule row shows the effective next time, and reopening the sheet can edit or cancel it.
+3. For a normal wake, `ScheduleEngine` removes the affected weekday from the shared recurring `HMEventTrigger` and adds a one-time `HMTimerTrigger` for each replacement ramp step. HomeKit does not provide a delayed-start form of its native weekday `HMEventTrigger`, so no synthetic `_resume` trigger is created.
+4. For Smart Wake, both dates travel in `WatchScheduleSnapshot`; the watch scheduler and phone trigger validator replace the original occurrence with the changed time. The phone's one-time fallback scene is created at the changed time.
+5. The override becomes ineffective after both the original and changed times pass (plus a five-minute delivery grace period). On the next iPhone foreground activation, `ScheduleEngine.onAppActive` clears the stale fields and rebuilds all background scenes through the normal `HMEventTrigger` path, restoring the affected weekday as a visible native repeat. The editor explicitly tells the user to reopen Lights Timer once after the changed wake.
+
 ### Normal Wake (usesSmartWake == false)
-1. **Background**: `syncBackgroundScenes` creates one `HMActionSet` scene and one `HMEventTrigger` per minute step, both named `LT_<shortID>_<step>`. Each trigger matches Home's native time-automation representation: an `HMCalendarEvent` containing only local hour/minute, all selected actual firing weekdays in `recurrences`, and `executeOnce = false`. This produces one visible Home automation per ramp step with the selected Repeat days. Trigger setup is transactional; failures remove partial triggers and orphaned scenes.
+1. **Background**: `syncBackgroundScenes` creates one `HMActionSet` scene and one `HMEventTrigger` per minute step, both named `LT_<shortID>_<step>`. Each trigger matches Home's native time-automation representation: an `HMCalendarEvent` containing only local hour/minute, all selected actual firing weekdays in `recurrences`, and `executeOnce = false`. This produces one visible Home automation per ramp step with the selected Repeat days. An active one-day change excludes its affected weekday and adds only the dated replacement triggers described above; the normal recurrence is restored on the next post-expiry app sync. Trigger setup is transactional; failures remove partial triggers and orphaned scenes.
 2. **Foreground**: `checkForActiveSchedules` detects in-progress window, starts 15-second `Timer.publish` for smooth direct writes via `LightController.applyToMultipleLights`. Smart wake schedules are **skipped** — they only trigger via the watch.
 3. Progress calculated as `elapsed / total`, brightness and color interpolated linearly.
 4. **Adaptive Lighting mode**: When `skipColorWrites` is true (either start or end color set to Adaptive), all hue/saturation writes are skipped in both foreground execution and background scenes. Only brightness + power are written, so HomeKit Adaptive Lighting on the bulb is not overridden. `LightController.applyToMultipleLights` accepts a `skipColor` parameter. The `ColorPreferenceView` shows per-color Adaptive toggles; when toggled, the color picker is hidden and the gradient preview shows a warm-to-cool approximation.

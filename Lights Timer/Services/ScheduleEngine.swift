@@ -66,6 +66,8 @@ final class ScheduleEngine {
     func onAppActive(modelContext: ModelContext) async {
         log("onAppActive started")
 
+        clearExpiredOneDayOverrides(modelContext: modelContext)
+
         // 1. Check if any schedule is currently in its execution window
         //    and start foreground execution if so
         await checkForActiveSchedules(modelContext: modelContext)
@@ -75,6 +77,21 @@ final class ScheduleEngine {
         await syncBackgroundScenes(modelContext: modelContext)
 
         log("onAppActive finished")
+    }
+
+    private func clearExpiredOneDayOverrides(modelContext: ModelContext) {
+        do {
+            let schedules = try modelContext.fetch(FetchDescriptor<LightSchedule>())
+            let clearedSchedules = schedules.filter { $0.clearExpiredOneDayOverride() }
+            guard !clearedSchedules.isEmpty else { return }
+
+            try modelContext.save()
+            log(
+                "Cleared expired one-day changes for \(clearedSchedules.map(\.name).joined(separator: ", "))"
+            )
+        } catch {
+            log("Failed to clear expired one-day changes: \(error)", level: .error)
+        }
     }
 
     func retryPendingBackgroundSync(modelContext: ModelContext) async {
@@ -658,11 +675,14 @@ final class ScheduleEngine {
         }
 
         // Normal schedules: create gradual ramp scenes spaced 1 minute apart.
-        // Each scene gets one calendar-event trigger containing every selected weekday,
-        // so HomeKit owns every repeat day without a watch or foreground app.
+        // A one-day change excludes its weekday from the normal calendar trigger,
+        // then adds a one-time trigger at the changed time. Once the override
+        // expires, the next app sync rebuilds the normal weekday recurrence through
+        // the same HMEventTrigger path used by every other schedule.
         let leadSeconds = TimeInterval(schedule.leadTimeMinutes * 60)
         let startTime = wakeUpTime.addingTimeInterval(-leadSeconds)
         let stepCount = schedule.leadTimeMinutes
+        let oneDayOverride = schedule.activeOneDayOverride
 
         log("Creating \(stepCount) scenes for '\(schedule.name)' starting at \(formatTimestamp(startTime))")
 
@@ -671,7 +691,8 @@ final class ScheduleEngine {
             let minuteOffsetFromWake = -schedule.leadTimeMinutes + (step - 1)
             let weeklyFireDates = weeklyEventFireDates(
                 for: schedule,
-                minuteOffsetFromWake: minuteOffsetFromWake
+                minuteOffsetFromWake: minuteOffsetFromWake,
+                excludingWakeDate: oneDayOverride?.originalWakeDate
             )
 
             let brightness = interpolateBrightness(
@@ -748,60 +769,47 @@ final class ScheduleEngine {
                     }
                 }
 
-                // 3. Match the native Home time-automation representation: one
-                // hour/minute-only calendar event with all firing weekdays attached.
-                guard let firstFireDate = weeklyFireDates.first else {
-                    do {
-                        try await removeActionSet(actionSet, from: home)
-                        log(
-                            "Removed orphaned scene \(sceneName) because it has no fire dates",
-                            level: .error
+                var addedTriggers: [HMTrigger] = []
+                do {
+                    if let recurringTrigger = makeWeeklyEventTrigger(
+                        name: sceneName,
+                        fireDates: weeklyFireDates
+                    ) {
+                        try await installTrigger(
+                            recurringTrigger,
+                            actionSet: actionSet,
+                            home: home
                         )
-                    } catch {
-                        log(
-                            "Failed to remove orphaned scene \(sceneName): \(error)",
-                            level: .error
+                        addedTriggers.append(recurringTrigger)
+                    }
+
+                    if let oneDayOverride {
+                        let overrideTriggers = try await installOneDayOverrideTriggers(
+                            oneDayOverride,
+                            minuteOffsetFromWake: minuteOffsetFromWake,
+                            sceneName: sceneName,
+                            actionSet: actionSet,
+                            home: home
+                        )
+                        addedTriggers.append(contentsOf: overrideTriggers)
+                    }
+
+                    guard !addedTriggers.isEmpty else {
+                        throw NSError(
+                            domain: "ScheduleEngine",
+                            code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "No valid trigger dates"]
                         )
                     }
-                    syncStepsCompleted += 1
-                    continue
-                }
 
-                let calendar = Calendar.current
-                var fireDateComponents = DateComponents()
-                fireDateComponents.hour = calendar.component(.hour, from: firstFireDate)
-                fireDateComponents.minute = calendar.component(.minute, from: firstFireDate)
-
-                let recurrences = weeklyFireDates.map { fireDate -> DateComponents in
-                    var components = DateComponents()
-                    components.weekday = calendar.component(.weekday, from: fireDate)
-                    return components
-                }
-
-                let calendarEvent = HMCalendarEvent(fire: fireDateComponents)
-                let trigger = HMEventTrigger(
-                    name: sceneName,
-                    events: [calendarEvent],
-                    end: nil,
-                    recurrences: recurrences,
-                    predicate: nil
-                )
-
-                var triggerWasAdded = false
-                do {
-                    try await addTrigger(trigger, to: home)
-                    triggerWasAdded = true
-                    try await addActionSetToTrigger(actionSet, trigger: trigger)
-                    try await updateExecuteOnce(false, for: trigger)
-                    try await enableTrigger(trigger)
                     syncStepsCompleted += 1
                 } catch {
-                    if triggerWasAdded {
+                    for trigger in addedTriggers {
                         do {
                             try await removeTrigger(trigger, from: home)
-                        } catch {
+                        } catch let rollbackError {
                             log(
-                                "Failed to roll back trigger \(sceneName): \(error)",
+                                "Failed to roll back trigger \(trigger.name): \(rollbackError)",
                                 level: .error
                             )
                         }
@@ -828,21 +836,114 @@ final class ScheduleEngine {
         log("Finished creating scenes for '\(schedule.name)'")
     }
 
+    private func makeWeeklyEventTrigger(
+        name: String,
+        fireDates: [Date]
+    ) -> HMEventTrigger? {
+        guard let firstFireDate = fireDates.first else { return nil }
+
+        let calendar = Calendar.current
+        var fireDateComponents = DateComponents()
+        fireDateComponents.hour = calendar.component(.hour, from: firstFireDate)
+        fireDateComponents.minute = calendar.component(.minute, from: firstFireDate)
+
+        let recurrences = fireDates.map { fireDate -> DateComponents in
+            var components = DateComponents()
+            components.weekday = calendar.component(.weekday, from: fireDate)
+            return components
+        }
+
+        return HMEventTrigger(
+            name: name,
+            events: [HMCalendarEvent(fire: fireDateComponents)],
+            end: nil,
+            recurrences: recurrences,
+            predicate: nil
+        )
+    }
+
+    private func installOneDayOverrideTriggers(
+        _ override: OneDayWakeOverride,
+        minuteOffsetFromWake: Int,
+        sceneName: String,
+        actionSet: HMActionSet,
+        home: HMHome
+    ) async throws -> [HMTrigger] {
+        let calendar = Calendar.current
+        let now = Date()
+        var installedTriggers: [HMTrigger] = []
+
+        do {
+            if let changedFireDate = calendar.date(
+                byAdding: .minute,
+                value: minuteOffsetFromWake,
+                to: override.wakeDate
+            ), changedFireDate > now.addingTimeInterval(5) {
+                let trigger = HMTimerTrigger(
+                    name: "\(sceneName)_once",
+                    fireDate: changedFireDate,
+                    recurrence: nil
+                )
+                try await installTrigger(trigger, actionSet: actionSet, home: home)
+                installedTriggers.append(trigger)
+            }
+
+            return installedTriggers
+        } catch {
+            for trigger in installedTriggers {
+                try? await removeTrigger(trigger, from: home)
+            }
+            throw error
+        }
+    }
+
+    private func installTrigger(
+        _ trigger: HMTrigger,
+        actionSet: HMActionSet,
+        home: HMHome
+    ) async throws {
+        var triggerWasAdded = false
+        do {
+            try await addTrigger(trigger, to: home)
+            triggerWasAdded = true
+            try await addActionSetToTrigger(actionSet, trigger: trigger)
+            if let eventTrigger = trigger as? HMEventTrigger {
+                try await updateExecuteOnce(false, for: eventTrigger)
+            }
+            try await enableTrigger(trigger)
+        } catch {
+            if triggerWasAdded {
+                try? await removeTrigger(trigger, from: home)
+            }
+            throw error
+        }
+    }
+
     private func weeklyEventFireDates(
         for schedule: LightSchedule,
         minuteOffsetFromWake: Int,
+        excludingWakeDate: Date? = nil,
         now: Date = Date()
     ) -> [Date] {
-        schedule.activeDays
+        let calendar = Calendar.current
+        let excludedWakeWeekday = excludingWakeDate.map {
+            calendar.component(.weekday, from: $0)
+        }
+
+        return schedule.activeDays
             .sorted(by: { $0.rawValue < $1.rawValue })
-            .compactMap { wakeDay in
+            .compactMap { wakeDay -> Date? in
+                if let excludedWakeWeekday,
+                   wakeDay.rawValue == excludedWakeWeekday {
+                    return nil
+                }
                 guard let wakeDate = nextWakeDate(schedule: schedule, on: wakeDay, after: now) else {
                     return nil
                 }
 
                 var fireDate = wakeDate.addingTimeInterval(TimeInterval(minuteOffsetFromWake * 60))
                 if fireDate <= now.addingTimeInterval(60) {
-                    guard let nextWeekFireDate = Calendar.current.date(
+                    guard let nextWeekFireDate = calendar.date(
                         byAdding: .day,
                         value: 7,
                         to: fireDate
@@ -969,8 +1070,14 @@ final class ScheduleEngine {
         let calendar = Calendar.current
         let now = Date()
         let activeDays = schedule.activeDays
+        let override = schedule.oneDayOverride(now: now)
+        var candidates: [Date] = []
 
         guard !activeDays.isEmpty else { return nil }
+
+        if let override, override.wakeDate > now {
+            candidates.append(override.wakeDate)
+        }
 
         for dayOffset in 0..<8 {
             guard let candidateDate = calendar.date(byAdding: .day, value: dayOffset, to: now) else {
@@ -990,11 +1097,16 @@ final class ScheduleEngine {
 
             // For today, only count if the wake-up time hasn't passed yet
             if wakeUpTime > now {
-                return wakeUpTime
+                if let override,
+                   calendar.isDate(wakeUpTime, inSameDayAs: override.originalWakeDate) {
+                    continue
+                }
+                candidates.append(wakeUpTime)
+                break
             }
         }
 
-        return nil
+        return candidates.min()
     }
 
     func calculateProgress(startTime: Date, endTime: Date, now: Date) -> Double {

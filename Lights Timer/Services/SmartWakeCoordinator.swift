@@ -216,11 +216,28 @@ final class SmartWakeCoordinator {
         for schedule: LightSchedule
     ) -> (wakeUpTime: Date, windowStart: Date)? {
         let calendar = Calendar.current
+        let oneDayOverride = schedule.oneDayOverride(now: triggerDate)
+
+        if let oneDayOverride {
+            let windowStart = oneDayOverride.wakeDate.addingTimeInterval(
+                -Double(schedule.smartWakeWindowMinutes) * 60
+            )
+            if triggerDate >= windowStart,
+               triggerDate <= oneDayOverride.wakeDate.addingTimeInterval(60) {
+                return (oneDayOverride.wakeDate, windowStart)
+            }
+        }
+
         let baseDay = calendar.startOfDay(for: triggerDate)
         let offsets = [0, -1, 1]
 
         for offset in offsets {
             guard let candidateDay = calendar.date(byAdding: .day, value: offset, to: baseDay) else {
+                continue
+            }
+
+            if let oneDayOverride,
+               calendar.isDate(candidateDay, inSameDayAs: oneDayOverride.originalWakeDate) {
                 continue
             }
 

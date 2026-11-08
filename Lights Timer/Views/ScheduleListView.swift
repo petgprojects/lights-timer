@@ -7,6 +7,7 @@ struct ScheduleListView: View {
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
     @Query(sort: \LightSchedule.createdAt) private var schedules: [LightSchedule]
     @State private var showingNewSchedule = false
+    @State private var scheduleForOneDayChange: LightSchedule?
 
     var body: some View {
         Group {
@@ -38,6 +39,11 @@ struct ScheduleListView: View {
         .sheet(isPresented: $showingNewSchedule, onDismiss: syncEngine) {
             NavigationStack {
                 ScheduleDetailView()
+            }
+        }
+        .sheet(item: $scheduleForOneDayChange, onDismiss: syncEngine) { schedule in
+            NavigationStack {
+                OneDayOverrideView(schedule: schedule)
             }
         }
     }
@@ -118,6 +124,13 @@ struct ScheduleListView: View {
                 }
                 .swipeActions(edge: .leading) {
                     Button {
+                        scheduleForOneDayChange = schedule
+                    } label: {
+                        Label("Change Next", systemImage: "calendar.badge.clock")
+                    }
+                    .tint(.blue)
+
+                    Button {
                         scheduleEngine.startTestExecution(for: schedule)
                     } label: {
                         Label("Test Lights", systemImage: "lightbulb.fill")
@@ -143,6 +156,18 @@ struct ScheduleListView: View {
                 Text(schedule.wakeUpTimeString)
                     .font(.system(.title3, design: .rounded, weight: .medium))
                     .foregroundStyle(schedule.isEnabled ? .primary : .secondary)
+
+                if let override = schedule.activeOneDayOverride {
+                    Label {
+                        Text(
+                            "Next: \(override.wakeDate.formatted(date: .abbreviated, time: .shortened))"
+                        )
+                    } icon: {
+                        Image(systemName: "calendar.badge.clock")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                }
 
                 HStack(spacing: 4) {
                     Text(schedule.activeDaysSummary)

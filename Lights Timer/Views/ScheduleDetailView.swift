@@ -335,6 +335,14 @@ struct ScheduleDetailView: View {
         let minute = components.minute ?? 0
 
         if let schedule = scheduleToEdit {
+            let recurringTimingChanged = schedule.wakeUpHour != hour
+                || schedule.wakeUpMinute != minute
+                || schedule.activeDays != activeDays
+            if recurringTimingChanged {
+                schedule.oneDayOverrideOriginalWakeDate = nil
+                schedule.oneDayOverrideWakeDate = nil
+            }
+
             schedule.name = name
             schedule.wakeUpHour = hour
             schedule.wakeUpMinute = minute

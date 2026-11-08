@@ -998,6 +998,17 @@ final class SmartAlarmScheduler: NSObject {
     private func nextWakeTime(for schedule: WatchScheduleSnapshot) -> Date? {
         let calendar = Calendar.current
         let now = Date()
+        let override = schedule.oneDayOverride(now: now)
+        var candidates: [Date] = []
+
+        if let override,
+           override.wakeDate > now,
+           !isCompletedOccurrence(
+               scheduleID: schedule.id,
+               wakeUpTime: override.wakeDate
+           ) {
+            candidates.append(override.wakeDate)
+        }
 
         for dayOffset in 0..<8 {
             guard let candidateDate = calendar.date(
@@ -1017,16 +1028,26 @@ final class SmartAlarmScheduler: NSObject {
             guard let wakeUpTime = calendar.date(from: components) else { continue }
             guard wakeUpTime > now else { continue }
 
-            if let completedOccurrence = completedWakeOccurrence,
-               completedOccurrence.scheduleID == schedule.id,
-               completedOccurrence.wakeUpTime == wakeUpTime {
+            if let override,
+               calendar.isDate(wakeUpTime, inSameDayAs: override.originalWakeDate) {
                 continue
             }
 
-            return wakeUpTime
+            if isCompletedOccurrence(scheduleID: schedule.id, wakeUpTime: wakeUpTime) {
+                continue
+            }
+
+            candidates.append(wakeUpTime)
+            break
         }
 
-        return nil
+        return candidates.min()
+    }
+
+    private func isCompletedOccurrence(scheduleID: UUID, wakeUpTime: Date) -> Bool {
+        guard let completedOccurrence = completedWakeOccurrence else { return false }
+        return completedOccurrence.scheduleID == scheduleID
+            && completedOccurrence.wakeUpTime == wakeUpTime
     }
 
     private func hasEquivalentArmedWake(for wake: PendingWake) -> Bool {

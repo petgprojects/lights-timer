@@ -21,6 +21,10 @@ final class LightSchedule {
     var lightNames: [String]
     var createdAt: Date
 
+    // One-day wake-time change
+    var oneDayOverrideOriginalWakeDate: Date?
+    var oneDayOverrideWakeDate: Date?
+
     // Adaptive Lighting
     var startColorIsAdaptive: Bool = false
     var endColorIsAdaptive: Bool = false
@@ -52,9 +56,11 @@ final class LightSchedule {
     }
 
     var wakeUpTimeString: String {
-        let hour = wakeUpHour % 12 == 0 ? 12 : wakeUpHour % 12
-        let period = wakeUpHour < 12 ? "AM" : "PM"
-        return String(format: "%d:%02d %@", hour, wakeUpMinute, period)
+        Self.formatTime(hour: wakeUpHour, minute: wakeUpMinute)
+    }
+
+    var activeOneDayOverride: OneDayWakeOverride? {
+        oneDayOverride(now: Date())
     }
 
     var activeDaysSummary: String {
@@ -105,6 +111,8 @@ final class LightSchedule {
         self.isEnabled = true
         self.lightIdentifiers = lightIdentifiers
         self.lightNames = lightNames
+        self.oneDayOverrideOriginalWakeDate = nil
+        self.oneDayOverrideWakeDate = nil
         self.startColorIsAdaptive = startColorIsAdaptive
         self.endColorIsAdaptive = endColorIsAdaptive
         self.createdAt = Date()
@@ -113,4 +121,71 @@ final class LightSchedule {
         self.hapticPatternRaw = hapticPatternRaw
         self.lastSmartWakeTriggerAt = nil
     }
+
+    func nextBaseOccurrence(after date: Date = Date()) -> Date? {
+        let calendar = Calendar.current
+        let activeDays = activeDays
+
+        guard !activeDays.isEmpty else { return nil }
+
+        for dayOffset in 0..<8 {
+            guard let candidateDate = calendar.date(
+                byAdding: .day,
+                value: dayOffset,
+                to: date
+            ) else { continue }
+
+            let weekday = calendar.component(.weekday, from: candidateDate)
+            guard let dayOfWeek = DayOfWeek(rawValue: weekday),
+                  activeDays.contains(dayOfWeek) else { continue }
+
+            var components = calendar.dateComponents([.year, .month, .day], from: candidateDate)
+            components.hour = wakeUpHour
+            components.minute = wakeUpMinute
+            components.second = 0
+
+            guard let wakeDate = calendar.date(from: components), wakeDate > date else {
+                continue
+            }
+            return wakeDate
+        }
+
+        return nil
+    }
+
+    func oneDayOverride(now: Date) -> OneDayWakeOverride? {
+        guard let originalWakeDate = oneDayOverrideOriginalWakeDate,
+              let wakeDate = oneDayOverrideWakeDate else { return nil }
+
+        let expirationDate = max(originalWakeDate, wakeDate).addingTimeInterval(5 * 60)
+        guard now <= expirationDate else { return nil }
+
+        return OneDayWakeOverride(
+            originalWakeDate: originalWakeDate,
+            wakeDate: wakeDate
+        )
+    }
+
+    @discardableResult
+    func clearExpiredOneDayOverride(now: Date = Date()) -> Bool {
+        guard oneDayOverrideOriginalWakeDate != nil || oneDayOverrideWakeDate != nil else {
+            return false
+        }
+        guard oneDayOverride(now: now) == nil else { return false }
+
+        oneDayOverrideOriginalWakeDate = nil
+        oneDayOverrideWakeDate = nil
+        return true
+    }
+
+    private static func formatTime(hour: Int, minute: Int) -> String {
+        let displayHour = hour % 12 == 0 ? 12 : hour % 12
+        let period = hour < 12 ? "AM" : "PM"
+        return String(format: "%d:%02d %@", displayHour, minute, period)
+    }
+}
+
+struct OneDayWakeOverride: Equatable {
+    let originalWakeDate: Date
+    let wakeDate: Date
 }

@@ -6,6 +6,8 @@ struct WatchScheduleSnapshot: Codable, Identifiable, Equatable {
     let wakeUpHour: Int
     let wakeUpMinute: Int
     let activeDaysRaw: [Int]
+    let oneDayOverrideOriginalWakeDate: Date?
+    let oneDayOverrideWakeDate: Date?
     let leadTimeMinutes: Int
     let usesSmartWake: Bool
     let smartWakeWindowMinutes: Int
@@ -36,6 +38,8 @@ extension WatchScheduleSnapshot {
             wakeUpHour: schedule.wakeUpHour,
             wakeUpMinute: schedule.wakeUpMinute,
             activeDaysRaw: schedule.activeDaysRaw,
+            oneDayOverrideOriginalWakeDate: schedule.oneDayOverrideOriginalWakeDate,
+            oneDayOverrideWakeDate: schedule.oneDayOverrideWakeDate,
             leadTimeMinutes: schedule.leadTimeMinutes,
             usesSmartWake: schedule.usesSmartWake,
             smartWakeWindowMinutes: schedule.smartWakeWindowMinutes,
