@@ -12,8 +12,6 @@ final class SmartWakeCoordinator {
     private let watchConnectivity: WatchConnectivityService
     private let modelContainer: ModelContainer
     private let logStore: PhoneLogStore
-    private let settingsStore: SmartWakeSettingsStore
-    private let calibrationService: SmartWakeCalibrationService
 
     private var firedToday: [UUID: Date] = [:]
     private var processedHandoffs: [UUID: ProcessedHandoffRecord] = [:]
@@ -30,16 +28,12 @@ final class SmartWakeCoordinator {
         scheduleEngine: ScheduleEngine,
         watchConnectivity: WatchConnectivityService,
         modelContainer: ModelContainer,
-        logStore: PhoneLogStore,
-        settingsStore: SmartWakeSettingsStore,
-        calibrationService: SmartWakeCalibrationService
+        logStore: PhoneLogStore
     ) {
         self.scheduleEngine = scheduleEngine
         self.watchConnectivity = watchConnectivity
         self.modelContainer = modelContainer
         self.logStore = logStore
-        self.settingsStore = settingsStore
-        self.calibrationService = calibrationService
 
         watchConnectivity.onSmartWakeTrigger = { [weak self] trigger in
             guard let self else { return }
@@ -339,13 +333,9 @@ final class SmartWakeCoordinator {
             let snapshots = schedules
                 .filter(\.usesSmartWake)
                 .map { WatchScheduleSnapshot(from: $0) }
-            watchConnectivity.sendSchedules(
-                snapshots,
-                powerMode: settingsStore.powerMode,
-                calibrationProfile: calibrationService.calibrationProfile
-            )
+            watchConnectivity.sendSchedules(snapshots)
             log(
-                "Synced \(snapshots.count) smart wake schedule(s) to watch with powerMode=\(settingsStore.powerMode.rawValue) calibrationNights=\(calibrationService.calibrationProfile.nightsConsidered)"
+                "Synced \(snapshots.count) smart wake schedule(s); movement calibration is watch-local"
             )
         } catch {
             log("Failed to sync schedules: \(error)", level: .error)

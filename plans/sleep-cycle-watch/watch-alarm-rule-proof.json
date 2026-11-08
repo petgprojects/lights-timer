@@ -1,0 +1,445 @@
+{
+  "scope": "Actual ARM64 checkForAlarm rule core original instructions at 0x1000997e0..0x100099fdc. Entry requires current alarm, future deadline, no delegate override. Date, Swift metadata/copy/exclusivity and logging are shimmed. Fire callback observed rather than run; upstream deadline/delegate/acquisition are outside this probe.",
+  "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+  "casesPassed": 36,
+  "cases": [
+    {
+      "name": "very_sensitive_active_False",
+      "input": {
+        "sensitive": true,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": null
+      }
+    },
+    {
+      "name": "very_sensitive_active_True",
+      "input": {
+        "sensitive": true,
+        "active": true
+      },
+      "result": {
+        "fire": true,
+        "last": null
+      }
+    },
+    {
+      "name": "new_intensity_0.039999999_last_None",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.039999999,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": null
+      }
+    },
+    {
+      "name": "new_intensity_0.039999999_last_880.0",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.039999999,
+        "last": 880.0
+      },
+      "result": {
+        "fire": false,
+        "last": 880.0
+      }
+    },
+    {
+      "name": "new_intensity_0.039999999_last_880.000001",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.039999999,
+        "last": 880.000001
+      },
+      "result": {
+        "fire": false,
+        "last": 880.000001
+      }
+    },
+    {
+      "name": "new_intensity_0.039999999_last_1010.0",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.039999999,
+        "last": 1010.0
+      },
+      "result": {
+        "fire": false,
+        "last": 1010.0
+      }
+    },
+    {
+      "name": "new_intensity_0.04_last_None",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.04,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": null
+      }
+    },
+    {
+      "name": "new_intensity_0.04_last_880.0",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.04,
+        "last": 880.0
+      },
+      "result": {
+        "fire": false,
+        "last": 880.0
+      }
+    },
+    {
+      "name": "new_intensity_0.04_last_880.000001",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.04,
+        "last": 880.000001
+      },
+      "result": {
+        "fire": false,
+        "last": 880.000001
+      }
+    },
+    {
+      "name": "new_intensity_0.04_last_1010.0",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.04,
+        "last": 1010.0
+      },
+      "result": {
+        "fire": false,
+        "last": 1010.0
+      }
+    },
+    {
+      "name": "new_intensity_0.040000001_last_None",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.040000001,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "new_intensity_0.040000001_last_880.0",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.040000001,
+        "last": 880.0
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "new_intensity_0.040000001_last_880.000001",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.040000001,
+        "last": 880.000001
+      },
+      "result": {
+        "fire": true,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "new_intensity_0.040000001_last_1010.0",
+      "input": {
+        "new": true,
+        "active": true,
+        "intensity": 0.040000001,
+        "last": 1010.0
+      },
+      "result": {
+        "fire": true,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_0.0_active_False",
+      "input": {
+        "last": 1000.0,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_0.0_active_True",
+      "input": {
+        "last": 1000.0,
+        "active": true
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_10.0_active_False",
+      "input": {
+        "last": 990.0,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": 990.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_10.0_active_True",
+      "input": {
+        "last": 990.0,
+        "active": true
+      },
+      "result": {
+        "fire": false,
+        "last": 990.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_10.000001_active_False",
+      "input": {
+        "last": 989.999999,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": 989.999999
+      }
+    },
+    {
+      "name": "sustained_elapsed_10.000001_active_True",
+      "input": {
+        "last": 989.999999,
+        "active": true
+      },
+      "result": {
+        "fire": true,
+        "last": 989.999999
+      }
+    },
+    {
+      "name": "sustained_elapsed_119.999_active_False",
+      "input": {
+        "last": 880.001,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": 880.001
+      }
+    },
+    {
+      "name": "sustained_elapsed_119.999_active_True",
+      "input": {
+        "last": 880.001,
+        "active": true
+      },
+      "result": {
+        "fire": true,
+        "last": 880.001
+      }
+    },
+    {
+      "name": "sustained_elapsed_120.0_active_False",
+      "input": {
+        "last": 880.0,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": 880.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_120.0_active_True",
+      "input": {
+        "last": 880.0,
+        "active": true
+      },
+      "result": {
+        "fire": true,
+        "last": 880.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_10000.0_active_False",
+      "input": {
+        "last": -9000.0,
+        "active": false
+      },
+      "result": {
+        "fire": false,
+        "last": -9000.0
+      }
+    },
+    {
+      "name": "sustained_elapsed_10000.0_active_True",
+      "input": {
+        "last": -9000.0,
+        "active": true
+      },
+      "result": {
+        "fire": true,
+        "last": -9000.0
+      }
+    },
+    {
+      "name": "delayed_intensity_0.099999999_last_None",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": null
+      }
+    },
+    {
+      "name": "delayed_intensity_0.099999999_last_900.0",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 900.0
+      },
+      "result": {
+        "fire": false,
+        "last": 900.0
+      }
+    },
+    {
+      "name": "delayed_intensity_0.1_last_None",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": null
+      }
+    },
+    {
+      "name": "delayed_intensity_0.1_last_900.0",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 900.0
+      },
+      "result": {
+        "fire": false,
+        "last": 900.0
+      }
+    },
+    {
+      "name": "delayed_intensity_0.100000001_last_None",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "delayed_intensity_0.100000001_last_900.0",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 900.0
+      },
+      "result": {
+        "fire": false,
+        "last": 900.0
+      }
+    },
+    {
+      "name": "delayed_intensity_0.5_last_None",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.5,
+        "last": null
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    },
+    {
+      "name": "delayed_intensity_0.5_last_900.0",
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.5,
+        "last": 900.0
+      },
+      "result": {
+        "fire": false,
+        "last": 900.0
+      }
+    },
+    {
+      "name": "nil_history_new_False",
+      "input": {
+        "active": true,
+        "intensity": 0.5,
+        "new": false
+      },
+      "result": {
+        "fire": false,
+        "last": null
+      }
+    },
+    {
+      "name": "nil_history_new_True",
+      "input": {
+        "active": true,
+        "intensity": 0.5,
+        "new": true
+      },
+      "result": {
+        "fire": false,
+        "last": 1000.0
+      }
+    }
+  ]
+}

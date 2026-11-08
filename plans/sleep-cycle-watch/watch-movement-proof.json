@@ -1,0 +1,311 @@
+{
+  "scope": "Original decrypted watch and phone FastMovementAnalyzer instructions executed with framework/runtime shims; no sensor hardware, scheduler, or complete app execution.",
+  "binaries": {
+    "watch": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+    "phone": "41b22231d7c49fa4846713213df067948c1ced3a12d28ad6e581f6072c2ba9b3"
+  },
+  "constructorCases": [
+    {
+      "dLimit": 0,
+      "watch": 0.0010460712300860652,
+      "phone": 0.0010460712300860652,
+      "formula": 0.0010460712300860652
+    },
+    {
+      "dLimit": 0.001,
+      "watch": 0.001070683548491348,
+      "phone": 0.001070683548491348,
+      "formula": 0.001070683548491348
+    },
+    {
+      "dLimit": 0.01,
+      "watch": 0.0013199575809733903,
+      "phone": 0.0013199575809733903,
+      "formula": 0.0013199575809733903
+    },
+    {
+      "dLimit": 0.039999999,
+      "watch": 0.002651893719201099,
+      "phone": 0.002651893719201099,
+      "formula": 0.002651893719201099
+    },
+    {
+      "dLimit": 0.04,
+      "watch": 0.0012628065623204977,
+      "phone": 0.0012628065623204977,
+      "formula": 0.0012628065623204977
+    },
+    {
+      "dLimit": 0.09000000000000001,
+      "watch": 0.0040395260551327715,
+      "phone": 0.0040395260551327715,
+      "formula": 0.0040395260551327715
+    },
+    {
+      "dLimit": 0.327,
+      "watch": 1.0,
+      "phone": 1.0,
+      "formula": 1.0
+    },
+    {
+      "dLimit": 0.5,
+      "watch": 55.88275380992968,
+      "phone": 55.88275380992968,
+      "formula": 55.88275380992968
+    }
+  ],
+  "traces": [
+    {
+      "name": "rest_and_step_actual_watch_default",
+      "samples": 900,
+      "events": [
+        {
+          "index": 100,
+          "time": 2.0,
+          "vector": [
+            0.12,
+            0,
+            1
+          ],
+          "new": true,
+          "inProgress": true,
+          "delayed": false,
+          "intensity": 0.12,
+          "counter": 101,
+          "historyIndex": 101,
+          "lastActiveTime": 2.0
+        },
+        {
+          "index": 601,
+          "time": 12.02,
+          "vector": [
+            0,
+            0,
+            1
+          ],
+          "new": false,
+          "inProgress": true,
+          "delayed": true,
+          "intensity": 0.059800664451827246,
+          "counter": 602,
+          "historyIndex": 0,
+          "lastActiveTime": 12.02
+        }
+      ],
+      "final": {
+        "new": false,
+        "inProgress": false,
+        "delayed": false,
+        "intensity": 0.0,
+        "counter": 900,
+        "historyIndex": 298,
+        "lastActiveTime": 12.02
+      }
+    },
+    {
+      "name": "slow_drift",
+      "samples": 1300,
+      "events": [
+        {
+          "index": 601,
+          "time": 12.02,
+          "vector": [
+            0.03005,
+            0,
+            1
+          ],
+          "new": true,
+          "inProgress": true,
+          "delayed": true,
+          "intensity": 0.015050000000000001,
+          "counter": 602,
+          "historyIndex": 0,
+          "lastActiveTime": 12.02
+        },
+        {
+          "index": 902,
+          "time": 18.04,
+          "vector": [
+            0.0451,
+            0,
+            1
+          ],
+          "new": false,
+          "inProgress": true,
+          "delayed": true,
+          "intensity": 0.015050000000000001,
+          "counter": 903,
+          "historyIndex": 0,
+          "lastActiveTime": 18.04
+        },
+        {
+          "index": 1203,
+          "time": 24.060000000000002,
+          "vector": [
+            0.06015,
+            0,
+            1
+          ],
+          "new": false,
+          "inProgress": true,
+          "delayed": true,
+          "intensity": 0.015050000000000001,
+          "counter": 1204,
+          "historyIndex": 0,
+          "lastActiveTime": 24.060000000000002
+        }
+      ],
+      "final": {
+        "new": false,
+        "inProgress": false,
+        "delayed": false,
+        "intensity": 5.000000000000837e-05,
+        "counter": 1300,
+        "historyIndex": 96,
+        "lastActiveTime": 24.060000000000002
+      }
+    },
+    {
+      "name": "random_3_axes",
+      "samples": 1000,
+      "events": [
+        {
+          "index": 1,
+          "time": 0.02,
+          "vector": [
+            -0.056018387399063965,
+            0.017283572330872812,
+            0.9590153002582394
+          ],
+          "new": true,
+          "inProgress": true,
+          "delayed": false,
+          "intensity": 0.11777305740186976,
+          "counter": 2,
+          "historyIndex": 2,
+          "lastActiveTime": 0.02
+        },
+        {
+          "index": 601,
+          "time": 12.02,
+          "vector": [
+            0.021991011769941324,
+            -0.01487086140033575,
+            1.058994614098879
+          ],
+          "new": false,
+          "inProgress": true,
+          "delayed": true,
+          "intensity": 0.007440694763819774,
+          "counter": 602,
+          "historyIndex": 0,
+          "lastActiveTime": 12.02
+        },
+        {
+          "index": 902,
+          "time": 18.04,
+          "vector": [
+            0.03134371904520229,
+            0.07146255841616662,
+            0.999740304683698
+          ],
+          "new": false,
+          "inProgress": true,
+          "delayed": true,
+          "intensity": 0.002926455057039744,
+          "counter": 903,
+          "historyIndex": 0,
+          "lastActiveTime": 18.04
+        }
+      ],
+      "final": {
+        "new": false,
+        "inProgress": true,
+        "delayed": false,
+        "intensity": 0.10907407110076252,
+        "counter": 1000,
+        "historyIndex": 97,
+        "lastActiveTime": 19.98
+      }
+    },
+    {
+      "name": "exact_threshold",
+      "samples": 3,
+      "events": [
+        {
+          "index": 2,
+          "time": 0.2,
+          "vector": [
+            0.0400000001,
+            0,
+            1
+          ],
+          "new": true,
+          "inProgress": true,
+          "delayed": false,
+          "intensity": 0.0400000001,
+          "counter": 3,
+          "historyIndex": 3,
+          "lastActiveTime": 0.2
+        }
+      ],
+      "final": {
+        "new": true,
+        "inProgress": true,
+        "delayed": false,
+        "intensity": 0.0400000001,
+        "counter": 3,
+        "historyIndex": 3,
+        "lastActiveTime": 0.2
+      }
+    },
+    {
+      "name": "quiet_10_second_boundary",
+      "samples": 6,
+      "events": [
+        {
+          "index": 1,
+          "time": 0.1,
+          "vector": [
+            0.08,
+            0,
+            1
+          ],
+          "new": true,
+          "inProgress": true,
+          "delayed": false,
+          "intensity": 0.08,
+          "counter": 2,
+          "historyIndex": 2,
+          "lastActiveTime": 0.1
+        },
+        {
+          "index": 5,
+          "time": 12,
+          "vector": [
+            0.08,
+            0,
+            1
+          ],
+          "new": true,
+          "inProgress": true,
+          "delayed": false,
+          "intensity": 0.08,
+          "counter": 6,
+          "historyIndex": 6,
+          "lastActiveTime": 12.0
+        }
+      ],
+      "final": {
+        "new": true,
+        "inProgress": true,
+        "delayed": false,
+        "intensity": 0.08,
+        "counter": 6,
+        "historyIndex": 6,
+        "lastActiveTime": 12.0
+      }
+    }
+  ],
+  "comparisonsPassed": 6434
+}

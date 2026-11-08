@@ -1,0 +1,145 @@
+{
+  "scope": "Original watch ARM64 instructions 0x10009C03C through 0x10009C17C; stopped before logging. Only runtime field-offset globals supplied; no algorithm stubs.",
+  "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+  "checksPassed": 23,
+  "cases": [
+    {
+      "windowSeconds": 0,
+      "windowMinutes": 0.0,
+      "regularThreshold": 8.5,
+      "maxThreshold": 11.0
+    },
+    {
+      "windowSeconds": 7200,
+      "windowMinutes": 120.0,
+      "regularThreshold": 7.0,
+      "maxThreshold": 9.5
+    },
+    {
+      "windowSeconds": 599.999,
+      "windowMinutes": 9.999983333333335,
+      "regularThreshold": 8.5,
+      "maxThreshold": 11.0
+    },
+    {
+      "windowSeconds": 600,
+      "windowMinutes": 10.0,
+      "regularThreshold": 8.5,
+      "maxThreshold": 11.0
+    },
+    {
+      "windowSeconds": 600.001,
+      "windowMinutes": 10.000016666666665,
+      "regularThreshold": 8.0,
+      "maxThreshold": 10.5
+    },
+    {
+      "windowSeconds": 899.999,
+      "windowMinutes": 14.999983333333335,
+      "regularThreshold": 8.0,
+      "maxThreshold": 10.5
+    },
+    {
+      "windowSeconds": 900,
+      "windowMinutes": 15.0,
+      "regularThreshold": 8.0,
+      "maxThreshold": 10.5
+    },
+    {
+      "windowSeconds": 900.001,
+      "windowMinutes": 15.000016666666665,
+      "regularThreshold": 7.5,
+      "maxThreshold": 10.0
+    },
+    {
+      "windowSeconds": 1199.999,
+      "windowMinutes": 19.999983333333333,
+      "regularThreshold": 7.5,
+      "maxThreshold": 10.0
+    },
+    {
+      "windowSeconds": 1200,
+      "windowMinutes": 20.0,
+      "regularThreshold": 7.5,
+      "maxThreshold": 10.0
+    },
+    {
+      "windowSeconds": 1200.001,
+      "windowMinutes": 20.000016666666667,
+      "regularThreshold": 7.0,
+      "maxThreshold": 9.5
+    },
+    {
+      "windowSeconds": 1799.999,
+      "windowMinutes": 29.999983333333333,
+      "regularThreshold": 7.0,
+      "maxThreshold": 9.5
+    },
+    {
+      "windowSeconds": 1800,
+      "windowMinutes": 30.0,
+      "regularThreshold": 7.0,
+      "maxThreshold": 9.5
+    },
+    {
+      "windowSeconds": 1800.001,
+      "windowMinutes": 30.000016666666667,
+      "regularThreshold": 6.0,
+      "maxThreshold": 8.5
+    },
+    {
+      "windowSeconds": 2699.999,
+      "windowMinutes": 44.99998333333333,
+      "regularThreshold": 6.0,
+      "maxThreshold": 8.5
+    },
+    {
+      "windowSeconds": 2700,
+      "windowMinutes": 45.0,
+      "regularThreshold": 6.0,
+      "maxThreshold": 8.5
+    },
+    {
+      "windowSeconds": 2700.001,
+      "windowMinutes": 45.00001666666667,
+      "regularThreshold": 5.5,
+      "maxThreshold": 7.0
+    },
+    {
+      "windowSeconds": 3599.999,
+      "windowMinutes": 59.99998333333333,
+      "regularThreshold": 5.5,
+      "maxThreshold": 7.0
+    },
+    {
+      "windowSeconds": 3600,
+      "windowMinutes": 60.0,
+      "regularThreshold": 5.5,
+      "maxThreshold": 7.0
+    },
+    {
+      "windowSeconds": 3600.001,
+      "windowMinutes": 60.00001666666667,
+      "regularThreshold": 5.0,
+      "maxThreshold": 6.5
+    },
+    {
+      "windowSeconds": 5399.999,
+      "windowMinutes": 89.99998333333333,
+      "regularThreshold": 5.0,
+      "maxThreshold": 6.5
+    },
+    {
+      "windowSeconds": 5400,
+      "windowMinutes": 90.0,
+      "regularThreshold": 5.0,
+      "maxThreshold": 6.5
+    },
+    {
+      "windowSeconds": 5400.001,
+      "windowMinutes": 90.00001666666667,
+      "regularThreshold": 7.0,
+      "maxThreshold": 9.5
+    }
+  ]
+}

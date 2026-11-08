@@ -1,0 +1,16 @@
+{
+  "suite": "production-phone-coordinator",
+  "status": "passed",
+  "checks": 19,
+  "result": "19 phone coordinator integration checks passed",
+  "source_sha256": {
+    "Lights Timer/Models/DayOfWeek.swift": "9532478ada15e933538decaf12c93ef8617b169a3c43a1767358680c2cfef227",
+    "Lights Timer/Models/LightSchedule.swift": "5be6380d697fba30f092776d764c4551692781a98b73d5cba70decb02bcccfb9",
+    "Lights Timer/Models/SmartWakeMessage.swift": "453e73150f26b41a356aafd751b694396823be303923ec39bb06e381007ab7d5",
+    "Lights Timer/Models/WatchScheduleSnapshot.swift": "3688f9fd596b723351db4360bc961c9121630f01aa6b6450e32cd9bd6917de27",
+    "Lights Timer/Services/SmartWakeCoordinator.swift": "31bd34d279b934096dc5ff90fe942461b07f81d4ecf922108ada2925369e56e2",
+    "tests/SmartWakeParity/PhoneHandoffChecks.swift": "d62caffaf9fb3446d2e8e88c4edb75de7f14d185c44cc3d5c5ff5ec21d043b90",
+    "tests/SmartWakeParity/run_phone_handoff.py": "d978e8e640dd757d7e00bce7ce4ce9b418e56359799df493144b3d2b3a8aeba2"
+  },
+  "scope": "Actual production coordinator and SwiftData models compiled for native macOS; HomeKit execution, WatchConnectivity transport and logging replaced with test doubles. Does not validate device accessory writes or message delivery."
+}

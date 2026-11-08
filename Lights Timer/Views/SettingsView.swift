@@ -5,8 +5,7 @@ struct SettingsView: View {
     @Environment(PhoneLogStore.self) private var phoneLogStore
     @Environment(ScheduleEngine.self) private var scheduleEngine
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
-    @Environment(SmartWakeSettingsStore.self) private var smartWakeSettings
-    @Environment(SmartWakeCalibrationService.self) private var smartWakeCalibration
+    @Environment(SmartWakeOccurrenceArchiveService.self) private var smartWakeArchive
     @Environment(WatchConnectivityService.self) private var watchConnectivity
     @Environment(WatchLogArchiveService.self) private var watchLogArchive
 
@@ -17,33 +16,21 @@ struct SettingsView: View {
     var body: some View {
         List {
             Section("Smart Wake") {
-                Picker("Power Mode", selection: powerModeBinding) {
-                    ForEach(SmartWakePowerMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
+                Label("Movement-based wake", systemImage: "waveform.path")
 
-                Text(smartWakeSettings.powerMode.summary)
+                Text("Your watch looks for qualifying wrist movement during the wake window. It calibrates from that night's recorded movement when enough history is available.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text(smartWakeSettings.powerMode.detail)
-                    .font(.caption)
-                    .foregroundStyle(smartWakeSettings.powerMode.isBatteryHeavy ? .orange : .secondary)
-
-                Text("Recommended: add Smart Wake Status to your watch Smart Stack or a complication for the best Balanced-mode reliability. Exact wake still falls back if early smart wake cannot start.")
+                Text("Keep the watch on overnight and open Lights Timer on the watch to arm the next wake. The exact wake-time light fallback remains scheduled in HomeKit.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                if !smartWakeCalibration.isAuthorized {
-                    Button("Grant Calibration Health Access") {
-                        Task {
-                            _ = await smartWakeCalibration.requestAuthorization()
-                        }
-                    }
-                }
+                Text("Heart rate is optional diagnostic information. Health data and phone calibration do not change the wake decision.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                Text(smartWakeCalibration.statusMessage)
+                Text(smartWakeArchive.statusMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -266,12 +253,6 @@ struct SettingsView: View {
         return formatter.string(from: date)
     }
 
-    private var powerModeBinding: Binding<SmartWakePowerMode> {
-        Binding(
-            get: { smartWakeSettings.powerMode },
-            set: { newValue in smartWakeSettings.powerMode = newValue }
-        )
-    }
 }
 
 #Preview {
@@ -290,8 +271,7 @@ struct SettingsView: View {
         for: LightSchedule.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
-    let settingsStore = SmartWakeSettingsStore()
-    let calibrationService = SmartWakeCalibrationService(logStore: phoneLogStore)
+    let occurrenceArchive = SmartWakeOccurrenceArchiveService(logStore: phoneLogStore)
     let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
 
     NavigationStack {
@@ -306,13 +286,10 @@ struct SettingsView: View {
             scheduleEngine: engine,
             watchConnectivity: connectivity,
             modelContainer: container,
-            logStore: phoneLogStore,
-            settingsStore: settingsStore,
-            calibrationService: calibrationService
+            logStore: phoneLogStore
         )
     )
-    .environment(settingsStore)
-    .environment(calibrationService)
+    .environment(occurrenceArchive)
     .environment(connectivity)
     .environment(watchLogArchive)
 }

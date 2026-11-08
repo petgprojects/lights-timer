@@ -121,34 +121,19 @@ struct WatchRootView: View {
                 }
             }
 
-            if !sessionController.isHealthKitAuthorized {
-                Button("Grant Health Access") {
-                    Task {
-                        _ = await sessionController.requestAuthorization()
-                        sessionManager.sendPermissionStatus(sessionController.motionStatusPayload)
-                        #if os(watchOS)
-                        alarmScheduler.onAppForeground()
-                        #endif
-                    }
-                }
-                .tint(.orange)
-            }
-
-            LabeledContent("Power Mode") {
-                Text(sessionManager.powerMode.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(sessionManager.powerMode.isBatteryHeavy ? .orange : .secondary)
-            }
-
-            Text(sessionManager.powerMode.detail)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            if sessionManager.powerMode == .balanced {
-                Text("Recommended: add Smart Wake Status to the Smart Stack or a complication for the best Balanced-mode reliability.")
+            LabeledContent("Smart Wake") {
+                Text("Wrist movement")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+
+            Text("Calibrates from this night's recorded movement. Keep the watch on overnight and open this app to arm the next wake.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Text("Add Smart Wake Status to the Smart Stack or a complication to see whether the next wake is armed.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -239,7 +224,7 @@ struct WatchRootView: View {
             Toggle("Verbose Diagnostics", isOn: runtimeDiagnosticsBinding)
             #endif
 
-            Text("Includes detailed motion, recorder, heart-rate, and heuristic logs. Increases file I/O and battery use.")
+            Text("Includes detailed movement, recorder, and optional heart-rate telemetry. Increases file I/O and battery use.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
@@ -252,6 +237,47 @@ struct WatchRootView: View {
                 Text(autoLaunchMessage)
                     .font(.caption2)
                     .foregroundStyle(autoLaunchMessageColor)
+            }
+
+            LabeledContent("Rule Phase") {
+                Text(sessionController.heuristicSnapshot.phaseDescription)
+                    .font(.caption2)
+            }
+
+            LabeledContent("History Events") {
+                Text("\(sessionController.heuristicSnapshot.historicalEventCount)")
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Events / Hour") {
+                Text(String(format: "%.2f", sessionController.heuristicSnapshot.historicalEventRate))
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Movement Filter") {
+                Text(String(format: "%.4f / %.4f", sessionController.heuristicSnapshot.dLimit, sessionController.heuristicSnapshot.raLimit))
+                    .font(.caption2)
+                    .monospacedDigit()
+            }
+
+            LabeledContent("Sensitive Mode") {
+                Text(sessionController.heuristicSnapshot.verySensitive ? "Yes" : "No")
+                    .font(.caption2)
+            }
+
+            Text("Heart rate is optional telemetry and does not affect wake decisions.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if !sessionController.isHealthKitAuthorized {
+                Button("Enable Health Telemetry") {
+                    Task {
+                        _ = await sessionController.requestAuthorization()
+                        sessionManager.sendPermissionStatus(sessionController.motionStatusPayload)
+                    }
+                }
             }
 
             LabeledContent("Passive HR") {
@@ -270,23 +296,6 @@ struct WatchRootView: View {
                     Text(nextWindow)
                         .font(.caption2)
                 }
-            }
-
-            LabeledContent("Baseline Ready") {
-                Text(sessionController.heuristicSnapshot.baselineReady ? "Yes" : "No")
-                    .font(.caption2)
-            }
-
-            LabeledContent("Baseline BPM") {
-                Text(sessionController.heuristicSnapshot.baselineHeartRate.map { String(format: "%.0f", $0) } ?? "--")
-                    .font(.caption2)
-                    .monospacedDigit()
-            }
-
-            LabeledContent("Baseline Samples") {
-                Text("\(sessionController.heuristicSnapshot.baselineSampleCount)")
-                    .font(.caption2)
-                    .monospacedDigit()
             }
 
             LabeledContent("Last HR") {
@@ -513,7 +522,7 @@ struct WatchRootView: View {
             #if os(watchOS)
             switch alarmScheduler.armingState {
             case .armed(let wakeUpTime, _):
-                return "\(sessionManager.powerMode.displayName) motion-first monitoring armed for \(formatTime(wakeUpTime))"
+                return "Movement monitoring armed for \(formatTime(wakeUpTime))"
             case .backstopActive(let wakeUpTime):
                 return "Recovered Smart Wake backstop active for \(formatTime(wakeUpTime))"
             case .needsForegroundToArm(let wakeUpTime):
@@ -531,7 +540,7 @@ struct WatchRootView: View {
             return "Smart Wake status unavailable in this build"
             #endif
         case .monitoring:
-            return "Watching for wake signals..."
+            return "Watching for wrist movement..."
         case .triggered:
             return "Light ramp started!"
         case .failed:

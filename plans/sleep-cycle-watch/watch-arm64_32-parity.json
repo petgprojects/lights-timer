@@ -1,0 +1,154 @@
+{
+  "scope": "Manual static instruction/branch comparison of 16 paired functions in independently decrypted ARM64 and ARM64_32. Swift descriptors/vtable slots establish method correspondence; raw disassembly and imported Foundation symbol names establish operation semantics. This is not an empirical ARM64_32 execution test or whole-application equivalence proof.",
+  "binarySHA256": "9b9ccab4cb476ee3d7a7266fc2db956efd8c54e50805a3782268cdac864d7f1f",
+  "result": "No algorithmic constant, branch, comparison-boundary or state-update difference found in covered routines for ordinary supported data. Pointer/object/Swift-array layouts differ, and array counters are native Int32 vs Int64.",
+  "functions": [
+    {
+      "name": "initialization",
+      "arm64": "0x100098690",
+      "arm64_32": "0x99bdc"
+    },
+    {
+      "name": "begin tracking",
+      "arm64": "0x10009c2cc",
+      "arm64_32": "0x9d5f4"
+    },
+    {
+      "name": "change phase/calibrate",
+      "arm64": "0x1000989f0",
+      "arm64_32": "0x99f3c"
+    },
+    {
+      "name": "fire delegate",
+      "arm64": "0x1000991e0",
+      "arm64_32": "0x9a6a0"
+    },
+    {
+      "name": "wake decision and guards",
+      "arm64": "0x100099334",
+      "arm64_32": "0x9a7ec"
+    },
+    {
+      "name": "armed filter",
+      "arm64": "0x10009a704",
+      "arm64_32": "0x9baec"
+    },
+    {
+      "name": "movement notification phases",
+      "arm64": "0x10009af74",
+      "arm64_32": "0x9c37c"
+    },
+    {
+      "name": "phase timestamps",
+      "arm64": "0x10009b4ec",
+      "arm64_32": "0x9c880"
+    },
+    {
+      "name": "stop tracking",
+      "arm64": "0x10009be18",
+      "arm64_32": "0x9d038"
+    },
+    {
+      "name": "window parameter table",
+      "arm64": "0x10009c03c",
+      "arm64_32": "0x9d2a8"
+    },
+    {
+      "name": "historical rate",
+      "arm64": "0x10008bbf4",
+      "arm64_32": "0x8cf58"
+    },
+    {
+      "name": "calibration guards/filter",
+      "arm64": "0x10008c6e8",
+      "arm64_32": "0x8da94"
+    },
+    {
+      "name": "binary search",
+      "arm64": "0x10008ca8c",
+      "arm64_32": "0x8de60"
+    },
+    {
+      "name": "effective end",
+      "arm64": "0x10008da78",
+      "arm64_32": "0x8ed14"
+    },
+    {
+      "name": "clamped duration",
+      "arm64": "0x10008dd68",
+      "arm64_32": "0x8f004"
+    },
+    {
+      "name": "runtime expiration predicate",
+      "arm64": "0x100036e74",
+      "arm64_32": "0x39bcc"
+    }
+  ],
+  "verifiedConstants": [
+    7200,
+    10800,
+    3600,
+    60,
+    2,
+    9.5,
+    0.02,
+    0.1,
+    10,
+    120,
+    300,
+    41
+  ],
+  "verifiedParameterTable": [
+    [
+      10,
+      8.5,
+      11
+    ],
+    [
+      15,
+      8,
+      10.5
+    ],
+    [
+      20,
+      7.5,
+      10
+    ],
+    [
+      30,
+      7,
+      9.5
+    ],
+    [
+      45,
+      6,
+      8.5
+    ],
+    [
+      60,
+      5.5,
+      7
+    ],
+    [
+      90,
+      5,
+      6.5
+    ],
+    [
+      ">90",
+      7,
+      9.5
+    ]
+  ],
+  "criticalLiteralLoads": {
+    "0x1d1ad0": 0.02,
+    "0x1d0660": 0.1
+  },
+  "artifacts": [
+    "arm32-method-map.json",
+    "alarm-arm64.asm",
+    "alarm-arm64_32.asm",
+    "parameter-arm64_32.asm",
+    "extras-arm64_32.asm"
+  ]
+}

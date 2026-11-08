@@ -1,0 +1,151 @@
+{
+  "SCWatchExtension": {
+    "scope": "Original embedded pre-encryption page hashes; CMS chain not evaluated.",
+    "slices": [
+      {
+        "cpuType": "0x100000c",
+        "cpuSubtype": "0x0",
+        "cryptoff": 16384,
+        "cryptsize": 2211840,
+        "originalCryptid": 1,
+        "recoveredCryptid": 0,
+        "encryptedRegionSHA256": "2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c",
+        "recoveredRegionSHA256": "821c255fc8eddde5eac03b4ecebfe84ed8f7977f047b5715a1dc15803b6a09e3",
+        "preEncryptionHashTables": [
+          {
+            "slot": 0,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 1,
+            "protectedPagesChecked": 540,
+            "mismatchedPageIndices": []
+          },
+          {
+            "slot": 4096,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 2,
+            "protectedPagesChecked": 540,
+            "mismatchedPageIndices": []
+          }
+        ],
+        "verified": true
+      },
+      {
+        "cpuType": "0x200000c",
+        "cpuSubtype": "0x1",
+        "cryptoff": 16384,
+        "cryptsize": 2211840,
+        "originalCryptid": 1,
+        "recoveredCryptid": 0,
+        "encryptedRegionSHA256": "995eb8b6f309fc20671f954c806d46c8fb67fa9fc3b3158604c0aa70bbeadda1",
+        "recoveredRegionSHA256": "1816ce58424adbe90d87b805fbbfaeba3a096afb3d637edd081bc7b3bf489d80",
+        "preEncryptionHashTables": [
+          {
+            "slot": 0,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 1,
+            "protectedPagesChecked": 540,
+            "mismatchedPageIndices": []
+          },
+          {
+            "slot": 4096,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 2,
+            "protectedPagesChecked": 540,
+            "mismatchedPageIndices": []
+          }
+        ],
+        "verified": true
+      }
+    ],
+    "allEncryptedSlicesVerified": true
+  },
+  "GMFoundation": {
+    "scope": "Original embedded pre-encryption page hashes; CMS chain not evaluated.",
+    "slices": [
+      {
+        "cpuType": "0x100000c",
+        "cpuSubtype": "0x0",
+        "cryptoff": 16384,
+        "cryptsize": 2375680,
+        "originalCryptid": 1,
+        "recoveredCryptid": 0,
+        "encryptedRegionSHA256": "2daf0c8849dc42e5b50796d57ea6bf8b4a39394b444dd3868d9ac2aa0560f6a3",
+        "recoveredRegionSHA256": "5610ef3def698c2216b237378d5868bdc0942b01961ad0b65cc45249acf9db8e",
+        "preEncryptionHashTables": [
+          {
+            "slot": 0,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 1,
+            "protectedPagesChecked": 580,
+            "mismatchedPageIndices": []
+          },
+          {
+            "slot": 4096,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 2,
+            "protectedPagesChecked": 580,
+            "mismatchedPageIndices": []
+          }
+        ],
+        "verified": true
+      }
+    ],
+    "allEncryptedSlicesVerified": true
+  },
+  "SleepCycleSDK": {
+    "scope": "Original embedded pre-encryption page hashes; CMS chain not evaluated.",
+    "slices": [
+      {
+        "cpuType": "0x100000c",
+        "cpuSubtype": "0x0",
+        "cryptoff": 16384,
+        "cryptsize": 1359872,
+        "originalCryptid": 1,
+        "recoveredCryptid": 0,
+        "encryptedRegionSHA256": "24c03ec82965c115bfa8166411cfd4b1b5e57c0ac22e5a21a519c90a41e29432",
+        "recoveredRegionSHA256": "bb0e2d154ae6ce93b8c62c1278ced566b20466955515c92ed7648a21373a8e87",
+        "preEncryptionHashTables": [
+          {
+            "slot": 0,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 1,
+            "protectedPagesChecked": 332,
+            "mismatchedPageIndices": []
+          },
+          {
+            "slot": 4096,
+            "version": "0x20500",
+            "pageBytes": 4096,
+            "hashType": 2,
+            "protectedPagesChecked": 332,
+            "mismatchedPageIndices": []
+          }
+        ],
+        "verified": true
+      }
+    ],
+    "allEncryptedSlicesVerified": true
+  },
+  "knownSDKPlaintextControl": {
+    "sdkProtectedBytes": 1359872,
+    "decryptedRegionMatchesPublicSDK": true,
+    "decryptedRegionSHA256": "bb0e2d154ae6ce93b8c62c1278ced566b20466955515c92ed7648a21373a8e87"
+  },
+  "watchDecryptedFileSHA256": "3e657e7c1e619a3bae7d13f3627b0fe0b4d204d4c45ef4f16aef673051c33e5d",
+  "negativeControl": {
+    "singleCorruptedByteRejected": true,
+    "affectedArchitecture": "arm64",
+    "affectedPageIndex": 4,
+    "mismatchCountPerHashTable": [
+      1,
+      1
+    ]
+  }
+}

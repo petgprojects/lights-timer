@@ -1,11 +1,11 @@
 import Foundation
 
-enum SmartWakeTriggerMode: String, Codable, Equatable {
+nonisolated enum SmartWakeTriggerMode: String, Codable, Equatable, Sendable {
     case earlyMotionTrigger
     case exactWakeFallback
 }
 
-struct SmartWakeSensorProvenance: Codable, Equatable {
+nonisolated struct SmartWakeSensorProvenance: Codable, Equatable, Sendable {
     let usedLiveMotion: Bool
     let usedRecordedMotionBaseline: Bool
     let usedHeartRate: Bool
@@ -21,7 +21,7 @@ struct SmartWakeSensorProvenance: Codable, Equatable {
     )
 }
 
-struct SmartWakeScoreTraceSummary: Codable, Equatable {
+nonisolated struct SmartWakeScoreTraceSummary: Codable, Equatable, Sendable {
     let peakCompositeConfidence: Double
     let peakMotionScore: Double
     let peakStillnessBreakScore: Double
@@ -43,7 +43,7 @@ struct SmartWakeScoreTraceSummary: Codable, Equatable {
     )
 }
 
-struct SmartWakeSampleGapSummary: Codable, Equatable {
+nonisolated struct SmartWakeSampleGapSummary: Codable, Equatable, Sendable {
     let longestHeartRateGapSeconds: Double
     let heartRateGapEventsOver90Seconds: Int
     let longestMotionGapSeconds: Double
@@ -59,7 +59,17 @@ struct SmartWakeSampleGapSummary: Codable, Equatable {
     )
 }
 
-struct SmartWakeOccurrenceSummary: Codable, Equatable, Identifiable {
+/// Movement-rule diagnostics are separate from the legacy composite score fields.
+nonisolated struct SmartWakeMovementTraceSummary: Codable, Equatable, Sendable {
+    let phaseDescription: String
+    let historicalEventRate: Double
+    let dLimit: Double
+    let raLimit: Double
+    let verySensitive: Bool
+    let historicalEventCount: Int
+}
+
+nonisolated struct SmartWakeOccurrenceSummary: Codable, Equatable, Identifiable, Sendable {
     let id: UUID
     let scheduleID: UUID
     let scheduleName: String
@@ -76,9 +86,15 @@ struct SmartWakeOccurrenceSummary: Codable, Equatable, Identifiable {
     let sampleGaps: SmartWakeSampleGapSummary
     let fallbackReason: String?
     let createdAt: Date
+    // Optional fields preserve decoding of existing archives and older watches.
+    // Synthesized decoding assigns nil when the old schema omits these keys.
+    var algorithmIdentifier: String? = "recovered-watch-movement-v1"
+    var movementTraceSummary: SmartWakeMovementTraceSummary? = nil
 }
 
-struct SmartWakeCalibrationProfile: Codable, Equatable, Sendable {
+/// Legacy wire/storage schema only. The movement algorithm never reads this
+/// profile; its thresholds come exclusively from the same night's watch history.
+nonisolated struct SmartWakeCalibrationProfile: Codable, Equatable, Sendable {
     let version: Int
     let updatedAt: Date
     let nightsConsidered: Int
@@ -134,7 +150,7 @@ struct SmartWakeCalibrationProfile: Codable, Equatable, Sendable {
     }
 }
 
-struct SmartWakeTriggerPayload: Codable, Equatable {
+nonisolated struct SmartWakeTriggerPayload: Codable, Equatable, Sendable {
     let triggerID: UUID
     let scheduleID: UUID
     let triggerDate: Date
@@ -275,6 +291,8 @@ struct HapticPatternChangePayload: Codable {
     let hapticPatternRaw: String
 }
 
+/// Compatibility with saved settings and older peers. Both values use the same
+/// production movement algorithm; there is no user-selectable accuracy mode.
 enum SmartWakePowerMode: String, Codable, CaseIterable, Identifiable {
     case balanced
     case highReliability
@@ -284,27 +302,27 @@ enum SmartWakePowerMode: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .balanced:
-            "Balanced"
+            "Movement"
         case .highReliability:
-            "High Reliability"
+            "Legacy diagnostic mode"
         }
     }
 
     var summary: String {
         switch self {
         case .balanced:
-            "Motion-first Smart Wake using live motion, recorder backfill, irregular heart-rate reinforcement, and exact-wake fallback."
+            "Movement-based Smart Wake with overnight movement calibration and exact-wake fallback."
         case .highReliability:
-            "Reserved for diagnostics and future experiments. Production Smart Wake uses the same motion-first path."
+            "Legacy diagnostic setting. Production Smart Wake uses the same movement-based algorithm."
         }
     }
 
     var detail: String {
         switch self {
         case .balanced:
-            "Recommended. Uses the scheduled smart-alarm session, live device motion at 10 Hz, recorder backfill, and exact-wake fallback without relying on background workout startup."
+            "Uses raw accelerometer samples at a requested 40 Hz during the alarm session, recorded overnight movement, and exact-wake fallback."
         case .highReliability:
-            "Experimental. The legacy overnight-workout path is no longer part of default Smart Wake behavior."
+            "Retained for compatibility. Health data and workout diagnostics do not change the production wake decision."
         }
     }
 

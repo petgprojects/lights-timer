@@ -7,8 +7,8 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     var isPhoneReachable: Bool = false
     var lastLightHandoff: SmartWakeLightHandoffPayload?
     private(set) var hasLoadedInitialScheduleContext = false
-    private(set) var powerMode: SmartWakePowerMode = SmartWakeSharedStore.loadPowerMode()
-    private(set) var calibrationProfile: SmartWakeCalibrationProfile = SmartWakeSharedStore.loadCalibrationProfile()
+    private(set) var powerMode: SmartWakePowerMode = .balanced
+    private(set) var calibrationProfile: SmartWakeCalibrationProfile = .default
 
     /// Called whenever schedules are received (including from background WCSession delivery).
     var onSchedulesUpdated: (([WatchScheduleSnapshot]) -> Void)?
@@ -22,6 +22,9 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
     init(logStore: SmartWakeLogStore) {
         self.logStore = logStore
         super.init()
+        // Migrate persisted legacy tuning into inert compatibility defaults.
+        SmartWakeSharedStore.savePowerMode(.balanced)
+        SmartWakeSharedStore.saveCalibrationProfile(.default)
         if WCSession.isSupported() {
             let session = WCSession.default
             session.delegate = self
@@ -317,16 +320,16 @@ final class WatchSessionManager: NSObject, WCSessionDelegate {
             }
 
             lastProcessedSyncPayload = data
-            powerMode = syncPayload.powerMode
-            calibrationProfile = syncPayload.calibrationProfile.clamped()
-            SmartWakeSharedStore.savePowerMode(syncPayload.powerMode)
-            SmartWakeSharedStore.saveCalibrationProfile(syncPayload.calibrationProfile)
+            powerMode = .balanced
+            calibrationProfile = .default
+            SmartWakeSharedStore.savePowerMode(.balanced)
+            SmartWakeSharedStore.saveCalibrationProfile(.default)
             activeSchedules = syncPayload.schedules
             hasLoadedInitialScheduleContext = true
             onSchedulesUpdated?(syncPayload.schedules)
             logStore.log(
                 "CONNECTIVITY",
-                "Received \(syncPayload.schedules.count) smart-wake schedule snapshot(s) from phone with powerMode=\(syncPayload.powerMode.rawValue) calibrationNights=\(syncPayload.calibrationProfile.nightsConsidered)"
+                "Received \(syncPayload.schedules.count) smart-wake schedule snapshot(s) from phone for recovered-watch-movement-v1 (legacy tuning ignored)"
             )
         } catch {
             logStore.log(

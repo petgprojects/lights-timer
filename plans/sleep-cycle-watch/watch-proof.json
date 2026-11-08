@@ -1,0 +1,4818 @@
+{
+  "app": "Sleep Cycle 6.26.430 (28530)",
+  "architectureExecuted": "ARM64",
+  "emulator": "Unicorn 2.1.4",
+  "scope": "Original decrypted machine instructions with explicit platform/runtime shims, compared against independent behavioral reconstructions. No vendor binary bytes included in these files.",
+  "totalComparisonChecksPassed": 6654,
+  "componentComparisonChecksPassed": {
+    "WatchMovementProbe.py": 6434,
+    "WatchAlarmParameterProbe.py": 23,
+    "WatchAlarmRuleProbe.py": 36,
+    "WatchArmedFilterProbe.py": 72,
+    "WatchHistoryCalibrationProbe.py": 33,
+    "WatchAlarmLifecycleProbe.py": 56
+  },
+  "countDefinition": "Movement: 8 constructor cases x 2 binary/model comparisons plus 3209 samples x 2 comparisons (watch/phone parity and watch/reference). Other components count one comparison per case. Additional model-vs-saved-output checks are not added again.",
+  "limitations": [
+    "Not a complete app launch, overnight hardware validation, or clinical accuracy validation.",
+    "ARM64_32 was statically cross-checked separately; these executable probes run ARM64.",
+    "Synthetic finite motion, timestamps, Swift metadata, Foundation Date operations, object lifetimes and notification fixtures replace the platform environment.",
+    "vDSP mean and libc exp use Python numerical equivalents; comparisons use the stated floating-point tolerance rather than claiming bit-identical platform math.",
+    "The lifecycle probe executes the dispatcher, alarm decision, armed filter and runtime expiry predicate; its phase-change callback supplies phase state and previously selected calibration inputs. It does not execute historical mode/filter selection at 0x1000989f0.",
+    "The history probe executes the rate calculation and recursive search; effective session end is supplied. Effective-end selection, calibration entry guards, D getter and recorder event binning are statically traced in the reference and specifications, not separately emulated by this suite.",
+    "Alarm firing is observed at the callback boundary. Actual haptics, audio, runtime scheduling, expiration callbacks, OS recovery and HealthKit interfaces remain outside this suite."
+  ],
+  "sourceSHA256": {
+    "WatchMovementProbe.py": "51d69bb3630f34574b1e90c32c0ca2e7f29475dcdc076c51cb3f40ec50995949",
+    "WatchAlarmParameterProbe.py": "78af7c9dc32391966fec3eed82f35f657fb18d44d66fe5c41d5cc4db679c8f27",
+    "WatchAlarmRuleProbe.py": "c06f0d390895ee849292efc26bb734f3c39a63b55e343f961880c11a5a8ba45a",
+    "WatchArmedFilterProbe.py": "9a1161588651431791e865c86e0bc2ab41cbbb375a18c4f963dae4a2794ef101",
+    "WatchHistoryCalibrationProbe.py": "a1394de1ba439a62b9123f99b268ab49b3704d9c0f6cf632cbc51ba0922ec0b8",
+    "WatchAlarmLifecycleProbe.py": "9014d3d07b4eb0f3c7c54209dc16ac2234fccb4326f022006071fae597bd7b7c",
+    "WatchAlgorithmReference.py": "c5bf4f010e5f0fbb2ae1da7320d1f5e65fb8cab6ed87432cc11b0a26a235db7b",
+    "WatchProbeSupport.py": "58233c68356b50edb4c5c13fd37c62cfd09544819512f9693d99ab2e07f35a22",
+    "RunWatchProbes.py": "17df10144af162b7e3ab4a65cc86b7514f3f13a7c7ff06e681e7e29cb7198e10"
+  },
+  "reports": {
+    "WatchMovementProbe.py": {
+      "scope": "Original decrypted watch and phone FastMovementAnalyzer instructions executed with framework/runtime shims; no sensor hardware, scheduler, or complete app execution.",
+      "binaries": {
+        "watch": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+        "phone": "41b22231d7c49fa4846713213df067948c1ced3a12d28ad6e581f6072c2ba9b3"
+      },
+      "constructorCases": [
+        {
+          "dLimit": 0,
+          "watch": 0.0010460712300860652,
+          "phone": 0.0010460712300860652,
+          "formula": 0.0010460712300860652
+        },
+        {
+          "dLimit": 0.001,
+          "watch": 0.001070683548491348,
+          "phone": 0.001070683548491348,
+          "formula": 0.001070683548491348
+        },
+        {
+          "dLimit": 0.01,
+          "watch": 0.0013199575809733903,
+          "phone": 0.0013199575809733903,
+          "formula": 0.0013199575809733903
+        },
+        {
+          "dLimit": 0.039999999,
+          "watch": 0.002651893719201099,
+          "phone": 0.002651893719201099,
+          "formula": 0.002651893719201099
+        },
+        {
+          "dLimit": 0.04,
+          "watch": 0.0012628065623204977,
+          "phone": 0.0012628065623204977,
+          "formula": 0.0012628065623204977
+        },
+        {
+          "dLimit": 0.09000000000000001,
+          "watch": 0.0040395260551327715,
+          "phone": 0.0040395260551327715,
+          "formula": 0.0040395260551327715
+        },
+        {
+          "dLimit": 0.327,
+          "watch": 1.0,
+          "phone": 1.0,
+          "formula": 1.0
+        },
+        {
+          "dLimit": 0.5,
+          "watch": 55.88275380992968,
+          "phone": 55.88275380992968,
+          "formula": 55.88275380992968
+        }
+      ],
+      "traces": [
+        {
+          "name": "rest_and_step_actual_watch_default",
+          "samples": 900,
+          "events": [
+            {
+              "index": 100,
+              "time": 2.0,
+              "vector": [
+                0.12,
+                0,
+                1
+              ],
+              "new": true,
+              "inProgress": true,
+              "delayed": false,
+              "intensity": 0.12,
+              "counter": 101,
+              "historyIndex": 101,
+              "lastActiveTime": 2.0
+            },
+            {
+              "index": 601,
+              "time": 12.02,
+              "vector": [
+                0,
+                0,
+                1
+              ],
+              "new": false,
+              "inProgress": true,
+              "delayed": true,
+              "intensity": 0.059800664451827246,
+              "counter": 602,
+              "historyIndex": 0,
+              "lastActiveTime": 12.02
+            }
+          ],
+          "final": {
+            "new": false,
+            "inProgress": false,
+            "delayed": false,
+            "intensity": 0.0,
+            "counter": 900,
+            "historyIndex": 298,
+            "lastActiveTime": 12.02
+          }
+        },
+        {
+          "name": "slow_drift",
+          "samples": 1300,
+          "events": [
+            {
+              "index": 601,
+              "time": 12.02,
+              "vector": [
+                0.03005,
+                0,
+                1
+              ],
+              "new": true,
+              "inProgress": true,
+              "delayed": true,
+              "intensity": 0.015050000000000001,
+              "counter": 602,
+              "historyIndex": 0,
+              "lastActiveTime": 12.02
+            },
+            {
+              "index": 902,
+              "time": 18.04,
+              "vector": [
+                0.0451,
+                0,
+                1
+              ],
+              "new": false,
+              "inProgress": true,
+              "delayed": true,
+              "intensity": 0.015050000000000001,
+              "counter": 903,
+              "historyIndex": 0,
+              "lastActiveTime": 18.04
+            },
+            {
+              "index": 1203,
+              "time": 24.060000000000002,
+              "vector": [
+                0.06015,
+                0,
+                1
+              ],
+              "new": false,
+              "inProgress": true,
+              "delayed": true,
+              "intensity": 0.015050000000000001,
+              "counter": 1204,
+              "historyIndex": 0,
+              "lastActiveTime": 24.060000000000002
+            }
+          ],
+          "final": {
+            "new": false,
+            "inProgress": false,
+            "delayed": false,
+            "intensity": 5.000000000000837e-05,
+            "counter": 1300,
+            "historyIndex": 96,
+            "lastActiveTime": 24.060000000000002
+          }
+        },
+        {
+          "name": "random_3_axes",
+          "samples": 1000,
+          "events": [
+            {
+              "index": 1,
+              "time": 0.02,
+              "vector": [
+                -0.056018387399063965,
+                0.017283572330872812,
+                0.9590153002582394
+              ],
+              "new": true,
+              "inProgress": true,
+              "delayed": false,
+              "intensity": 0.11777305740186976,
+              "counter": 2,
+              "historyIndex": 2,
+              "lastActiveTime": 0.02
+            },
+            {
+              "index": 601,
+              "time": 12.02,
+              "vector": [
+                0.021991011769941324,
+                -0.01487086140033575,
+                1.058994614098879
+              ],
+              "new": false,
+              "inProgress": true,
+              "delayed": true,
+              "intensity": 0.007440694763819774,
+              "counter": 602,
+              "historyIndex": 0,
+              "lastActiveTime": 12.02
+            },
+            {
+              "index": 902,
+              "time": 18.04,
+              "vector": [
+                0.03134371904520229,
+                0.07146255841616662,
+                0.999740304683698
+              ],
+              "new": false,
+              "inProgress": true,
+              "delayed": true,
+              "intensity": 0.002926455057039744,
+              "counter": 903,
+              "historyIndex": 0,
+              "lastActiveTime": 18.04
+            }
+          ],
+          "final": {
+            "new": false,
+            "inProgress": true,
+            "delayed": false,
+            "intensity": 0.10907407110076252,
+            "counter": 1000,
+            "historyIndex": 97,
+            "lastActiveTime": 19.98
+          }
+        },
+        {
+          "name": "exact_threshold",
+          "samples": 3,
+          "events": [
+            {
+              "index": 2,
+              "time": 0.2,
+              "vector": [
+                0.0400000001,
+                0,
+                1
+              ],
+              "new": true,
+              "inProgress": true,
+              "delayed": false,
+              "intensity": 0.0400000001,
+              "counter": 3,
+              "historyIndex": 3,
+              "lastActiveTime": 0.2
+            }
+          ],
+          "final": {
+            "new": true,
+            "inProgress": true,
+            "delayed": false,
+            "intensity": 0.0400000001,
+            "counter": 3,
+            "historyIndex": 3,
+            "lastActiveTime": 0.2
+          }
+        },
+        {
+          "name": "quiet_10_second_boundary",
+          "samples": 6,
+          "events": [
+            {
+              "index": 1,
+              "time": 0.1,
+              "vector": [
+                0.08,
+                0,
+                1
+              ],
+              "new": true,
+              "inProgress": true,
+              "delayed": false,
+              "intensity": 0.08,
+              "counter": 2,
+              "historyIndex": 2,
+              "lastActiveTime": 0.1
+            },
+            {
+              "index": 5,
+              "time": 12,
+              "vector": [
+                0.08,
+                0,
+                1
+              ],
+              "new": true,
+              "inProgress": true,
+              "delayed": false,
+              "intensity": 0.08,
+              "counter": 6,
+              "historyIndex": 6,
+              "lastActiveTime": 12.0
+            }
+          ],
+          "final": {
+            "new": true,
+            "inProgress": true,
+            "delayed": false,
+            "intensity": 0.08,
+            "counter": 6,
+            "historyIndex": 6,
+            "lastActiveTime": 12.0
+          }
+        }
+      ],
+      "comparisonsPassed": 6434
+    },
+    "WatchAlarmParameterProbe.py": {
+      "scope": "Original watch ARM64 instructions 0x10009C03C through 0x10009C17C; stopped before logging. Only runtime field-offset globals supplied; no algorithm stubs.",
+      "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+      "checksPassed": 23,
+      "cases": [
+        {
+          "windowSeconds": 0,
+          "windowMinutes": 0.0,
+          "regularThreshold": 8.5,
+          "maxThreshold": 11.0
+        },
+        {
+          "windowSeconds": 7200,
+          "windowMinutes": 120.0,
+          "regularThreshold": 7.0,
+          "maxThreshold": 9.5
+        },
+        {
+          "windowSeconds": 599.999,
+          "windowMinutes": 9.999983333333335,
+          "regularThreshold": 8.5,
+          "maxThreshold": 11.0
+        },
+        {
+          "windowSeconds": 600,
+          "windowMinutes": 10.0,
+          "regularThreshold": 8.5,
+          "maxThreshold": 11.0
+        },
+        {
+          "windowSeconds": 600.001,
+          "windowMinutes": 10.000016666666665,
+          "regularThreshold": 8.0,
+          "maxThreshold": 10.5
+        },
+        {
+          "windowSeconds": 899.999,
+          "windowMinutes": 14.999983333333335,
+          "regularThreshold": 8.0,
+          "maxThreshold": 10.5
+        },
+        {
+          "windowSeconds": 900,
+          "windowMinutes": 15.0,
+          "regularThreshold": 8.0,
+          "maxThreshold": 10.5
+        },
+        {
+          "windowSeconds": 900.001,
+          "windowMinutes": 15.000016666666665,
+          "regularThreshold": 7.5,
+          "maxThreshold": 10.0
+        },
+        {
+          "windowSeconds": 1199.999,
+          "windowMinutes": 19.999983333333333,
+          "regularThreshold": 7.5,
+          "maxThreshold": 10.0
+        },
+        {
+          "windowSeconds": 1200,
+          "windowMinutes": 20.0,
+          "regularThreshold": 7.5,
+          "maxThreshold": 10.0
+        },
+        {
+          "windowSeconds": 1200.001,
+          "windowMinutes": 20.000016666666667,
+          "regularThreshold": 7.0,
+          "maxThreshold": 9.5
+        },
+        {
+          "windowSeconds": 1799.999,
+          "windowMinutes": 29.999983333333333,
+          "regularThreshold": 7.0,
+          "maxThreshold": 9.5
+        },
+        {
+          "windowSeconds": 1800,
+          "windowMinutes": 30.0,
+          "regularThreshold": 7.0,
+          "maxThreshold": 9.5
+        },
+        {
+          "windowSeconds": 1800.001,
+          "windowMinutes": 30.000016666666667,
+          "regularThreshold": 6.0,
+          "maxThreshold": 8.5
+        },
+        {
+          "windowSeconds": 2699.999,
+          "windowMinutes": 44.99998333333333,
+          "regularThreshold": 6.0,
+          "maxThreshold": 8.5
+        },
+        {
+          "windowSeconds": 2700,
+          "windowMinutes": 45.0,
+          "regularThreshold": 6.0,
+          "maxThreshold": 8.5
+        },
+        {
+          "windowSeconds": 2700.001,
+          "windowMinutes": 45.00001666666667,
+          "regularThreshold": 5.5,
+          "maxThreshold": 7.0
+        },
+        {
+          "windowSeconds": 3599.999,
+          "windowMinutes": 59.99998333333333,
+          "regularThreshold": 5.5,
+          "maxThreshold": 7.0
+        },
+        {
+          "windowSeconds": 3600,
+          "windowMinutes": 60.0,
+          "regularThreshold": 5.5,
+          "maxThreshold": 7.0
+        },
+        {
+          "windowSeconds": 3600.001,
+          "windowMinutes": 60.00001666666667,
+          "regularThreshold": 5.0,
+          "maxThreshold": 6.5
+        },
+        {
+          "windowSeconds": 5399.999,
+          "windowMinutes": 89.99998333333333,
+          "regularThreshold": 5.0,
+          "maxThreshold": 6.5
+        },
+        {
+          "windowSeconds": 5400,
+          "windowMinutes": 90.0,
+          "regularThreshold": 5.0,
+          "maxThreshold": 6.5
+        },
+        {
+          "windowSeconds": 5400.001,
+          "windowMinutes": 90.00001666666667,
+          "regularThreshold": 7.0,
+          "maxThreshold": 9.5
+        }
+      ]
+    },
+    "WatchAlarmRuleProbe.py": {
+      "scope": "Actual ARM64 checkForAlarm rule core original instructions at 0x1000997e0..0x100099fdc. Entry requires current alarm, future deadline, no delegate override. Date, Swift metadata/copy/exclusivity and logging are shimmed. Fire callback observed rather than run; upstream deadline/delegate/acquisition are outside this probe.",
+      "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+      "casesPassed": 36,
+      "cases": [
+        {
+          "name": "very_sensitive_active_False",
+          "input": {
+            "sensitive": true,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": null
+          }
+        },
+        {
+          "name": "very_sensitive_active_True",
+          "input": {
+            "sensitive": true,
+            "active": true
+          },
+          "result": {
+            "fire": true,
+            "last": null
+          }
+        },
+        {
+          "name": "new_intensity_0.039999999_last_None",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.039999999,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": null
+          }
+        },
+        {
+          "name": "new_intensity_0.039999999_last_880.0",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.039999999,
+            "last": 880.0
+          },
+          "result": {
+            "fire": false,
+            "last": 880.0
+          }
+        },
+        {
+          "name": "new_intensity_0.039999999_last_880.000001",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.039999999,
+            "last": 880.000001
+          },
+          "result": {
+            "fire": false,
+            "last": 880.000001
+          }
+        },
+        {
+          "name": "new_intensity_0.039999999_last_1010.0",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.039999999,
+            "last": 1010.0
+          },
+          "result": {
+            "fire": false,
+            "last": 1010.0
+          }
+        },
+        {
+          "name": "new_intensity_0.04_last_None",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.04,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": null
+          }
+        },
+        {
+          "name": "new_intensity_0.04_last_880.0",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.04,
+            "last": 880.0
+          },
+          "result": {
+            "fire": false,
+            "last": 880.0
+          }
+        },
+        {
+          "name": "new_intensity_0.04_last_880.000001",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.04,
+            "last": 880.000001
+          },
+          "result": {
+            "fire": false,
+            "last": 880.000001
+          }
+        },
+        {
+          "name": "new_intensity_0.04_last_1010.0",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.04,
+            "last": 1010.0
+          },
+          "result": {
+            "fire": false,
+            "last": 1010.0
+          }
+        },
+        {
+          "name": "new_intensity_0.040000001_last_None",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.040000001,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "new_intensity_0.040000001_last_880.0",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.040000001,
+            "last": 880.0
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "new_intensity_0.040000001_last_880.000001",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.040000001,
+            "last": 880.000001
+          },
+          "result": {
+            "fire": true,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "new_intensity_0.040000001_last_1010.0",
+          "input": {
+            "new": true,
+            "active": true,
+            "intensity": 0.040000001,
+            "last": 1010.0
+          },
+          "result": {
+            "fire": true,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_0.0_active_False",
+          "input": {
+            "last": 1000.0,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_0.0_active_True",
+          "input": {
+            "last": 1000.0,
+            "active": true
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_10.0_active_False",
+          "input": {
+            "last": 990.0,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": 990.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_10.0_active_True",
+          "input": {
+            "last": 990.0,
+            "active": true
+          },
+          "result": {
+            "fire": false,
+            "last": 990.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_10.000001_active_False",
+          "input": {
+            "last": 989.999999,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": 989.999999
+          }
+        },
+        {
+          "name": "sustained_elapsed_10.000001_active_True",
+          "input": {
+            "last": 989.999999,
+            "active": true
+          },
+          "result": {
+            "fire": true,
+            "last": 989.999999
+          }
+        },
+        {
+          "name": "sustained_elapsed_119.999_active_False",
+          "input": {
+            "last": 880.001,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": 880.001
+          }
+        },
+        {
+          "name": "sustained_elapsed_119.999_active_True",
+          "input": {
+            "last": 880.001,
+            "active": true
+          },
+          "result": {
+            "fire": true,
+            "last": 880.001
+          }
+        },
+        {
+          "name": "sustained_elapsed_120.0_active_False",
+          "input": {
+            "last": 880.0,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": 880.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_120.0_active_True",
+          "input": {
+            "last": 880.0,
+            "active": true
+          },
+          "result": {
+            "fire": true,
+            "last": 880.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_10000.0_active_False",
+          "input": {
+            "last": -9000.0,
+            "active": false
+          },
+          "result": {
+            "fire": false,
+            "last": -9000.0
+          }
+        },
+        {
+          "name": "sustained_elapsed_10000.0_active_True",
+          "input": {
+            "last": -9000.0,
+            "active": true
+          },
+          "result": {
+            "fire": true,
+            "last": -9000.0
+          }
+        },
+        {
+          "name": "delayed_intensity_0.099999999_last_None",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": null
+          }
+        },
+        {
+          "name": "delayed_intensity_0.099999999_last_900.0",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 900.0
+          },
+          "result": {
+            "fire": false,
+            "last": 900.0
+          }
+        },
+        {
+          "name": "delayed_intensity_0.1_last_None",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": null
+          }
+        },
+        {
+          "name": "delayed_intensity_0.1_last_900.0",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 900.0
+          },
+          "result": {
+            "fire": false,
+            "last": 900.0
+          }
+        },
+        {
+          "name": "delayed_intensity_0.100000001_last_None",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "delayed_intensity_0.100000001_last_900.0",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 900.0
+          },
+          "result": {
+            "fire": false,
+            "last": 900.0
+          }
+        },
+        {
+          "name": "delayed_intensity_0.5_last_None",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.5,
+            "last": null
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        },
+        {
+          "name": "delayed_intensity_0.5_last_900.0",
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.5,
+            "last": 900.0
+          },
+          "result": {
+            "fire": false,
+            "last": 900.0
+          }
+        },
+        {
+          "name": "nil_history_new_False",
+          "input": {
+            "active": true,
+            "intensity": 0.5,
+            "new": false
+          },
+          "result": {
+            "fire": false,
+            "last": null
+          }
+        },
+        {
+          "name": "nil_history_new_True",
+          "input": {
+            "active": true,
+            "intensity": 0.5,
+            "new": true
+          },
+          "result": {
+            "fire": false,
+            "last": 1000.0
+          }
+        }
+      ]
+    },
+    "WatchArmedFilterProbe.py": {
+      "scope": "Original complete ARM64 extendedFilterForArmedPhase instructions at 0x10009a704, with Date, Swift metadata/copy and logging shims. Synthetic movement input and field offsets; no sensor hardware or app scheduling.",
+      "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+      "casesPassed": 72,
+      "cases": [
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": -1.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": -1.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": 990.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": 990.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": 990.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": 990.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": 989.999999,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": 989.999999,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": 989.999999,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": 989.999999,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": 999.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": 999.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "last": 999.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.039999999,
+            "duration": 0.0,
+            "last": 999.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": -1.0,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": -1.0,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": 990.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": 990.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": 989.999999,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": 989.999999,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": 999.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "last": 999.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.04,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": -1.0,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": -1.0,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": 990.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": 990.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": 989.999999,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": 989.999999,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": 999.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "last": 999.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.040000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": -1.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": -1.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 990.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": 990.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 990.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": 990.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 989.999999,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": 989.999999,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 989.999999,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": 989.999999,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 999.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": 999.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "last": 999.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.099999999,
+            "duration": 0.0,
+            "last": 999.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": -1.0,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": -1.0,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 990.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 990.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 989.999999,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 989.999999,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 999.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "last": 999.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.1,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": -1.0,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": -1.0,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 990.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 990.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 989.999999,
+            "new": false
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 989.999999,
+            "new": true
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 999.0,
+            "new": false
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "last": 999.0,
+            "new": true
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.100000001,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": false,
+            "new": false,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": false,
+            "new": false,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": false,
+            "new": true,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": false,
+            "new": true,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": true,
+            "new": false,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": true,
+            "new": false,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": true,
+            "new": true,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 1.0,
+            "active": true,
+            "new": true,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": false,
+            "new": false,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": false,
+            "new": false,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": false,
+            "new": true,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": false,
+            "new": true,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": true,
+            "new": false,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": true,
+            "new": false,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": true,
+            "new": true,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 1.0,
+            "slow": 0.1,
+            "active": true,
+            "new": true,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": false,
+            "new": false,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": false,
+            "new": false,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": false,
+            "new": true,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": false,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": false,
+            "new": true,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": true,
+            "new": false,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": true,
+            "new": false,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": true,
+            "new": true,
+            "delayed": false,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": true,
+            "active": true,
+            "delayed": false,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": 1000.0,
+            "date": 1000.0
+          }
+        },
+        {
+          "input": {
+            "fast": 0.04,
+            "slow": 1.0,
+            "active": true,
+            "new": true,
+            "delayed": true,
+            "intensity": 0.2
+          },
+          "result": {
+            "new": false,
+            "active": false,
+            "delayed": true,
+            "intensity": 0.2,
+            "duration": 0.0,
+            "last": -1.0,
+            "date": 1000.0
+          }
+        }
+      ]
+    },
+    "WatchHistoryCalibrationProbe.py": {
+      "scope": "Complete original ARM64 event-rate 0x10008bbf4 and recursive calibration search 0x10008ca8c instructions. Framework Date/Swift allocation/refcount/exclusivity shims; session effectiveEnd supplied, not evaluated. Native-array fixtures include cutoff/intensity boundaries and future-date behavior.",
+      "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+      "checksPassed": 33,
+      "rateCases": [
+        {
+          "start": 100.0,
+          "end": 100.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              101.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.04,
+          "slow": 0.1,
+          "result": 9.5
+        },
+        {
+          "start": 100.0,
+          "end": 100.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              101.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.040000001,
+          "slow": 0.100000001,
+          "result": 9.5
+        },
+        {
+          "start": 100.0,
+          "end": 100.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              101.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.0,
+          "slow": 0.0,
+          "result": 9.5
+        },
+        {
+          "start": 100.0,
+          "end": 100.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              101.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 1.0,
+          "slow": 1.0,
+          "result": 9.5
+        },
+        {
+          "start": 100.0,
+          "end": 3700.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              3701.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.04,
+          "slow": 0.1,
+          "result": 3.0
+        },
+        {
+          "start": 100.0,
+          "end": 3700.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              3701.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.040000001,
+          "slow": 0.100000001,
+          "result": 1.0
+        },
+        {
+          "start": 100.0,
+          "end": 3700.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              3701.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.0,
+          "slow": 0.0,
+          "result": 5.0
+        },
+        {
+          "start": 100.0,
+          "end": 3700.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              3701.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 1.0,
+          "slow": 1.0,
+          "result": 0.0
+        },
+        {
+          "start": 100.0,
+          "end": 10900.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              10901.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.04,
+          "slow": 0.1,
+          "result": 1.0
+        },
+        {
+          "start": 100.0,
+          "end": 10900.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              10901.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.040000001,
+          "slow": 0.100000001,
+          "result": 0.3333333333333333
+        },
+        {
+          "start": 100.0,
+          "end": 10900.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              10901.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.0,
+          "slow": 0.0,
+          "result": 1.6666666666666667
+        },
+        {
+          "start": 100.0,
+          "end": 10900.0,
+          "cutoff": 100.0,
+          "events": [
+            [
+              99.999999,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              1,
+              0.04
+            ],
+            [
+              100.000001,
+              1,
+              0.039999999
+            ],
+            [
+              100.0,
+              2,
+              0.1
+            ],
+            [
+              100.0,
+              2,
+              0.099999999
+            ],
+            [
+              10901.0,
+              1,
+              0.5
+            ],
+            [
+              100.0,
+              0,
+              10
+            ],
+            [
+              100.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 1.0,
+          "slow": 1.0,
+          "result": 0.0
+        },
+        {
+          "start": 100.0,
+          "end": 14500.0,
+          "cutoff": 3700.0,
+          "events": [
+            [
+              3699.999999,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              1,
+              0.04
+            ],
+            [
+              3700.000001,
+              1,
+              0.039999999
+            ],
+            [
+              3700.0,
+              2,
+              0.1
+            ],
+            [
+              3700.0,
+              2,
+              0.099999999
+            ],
+            [
+              14501.0,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              0,
+              10
+            ],
+            [
+              3700.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.04,
+          "slow": 0.1,
+          "result": 1.0
+        },
+        {
+          "start": 100.0,
+          "end": 14500.0,
+          "cutoff": 3700.0,
+          "events": [
+            [
+              3699.999999,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              1,
+              0.04
+            ],
+            [
+              3700.000001,
+              1,
+              0.039999999
+            ],
+            [
+              3700.0,
+              2,
+              0.1
+            ],
+            [
+              3700.0,
+              2,
+              0.099999999
+            ],
+            [
+              14501.0,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              0,
+              10
+            ],
+            [
+              3700.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.040000001,
+          "slow": 0.100000001,
+          "result": 0.3333333333333333
+        },
+        {
+          "start": 100.0,
+          "end": 14500.0,
+          "cutoff": 3700.0,
+          "events": [
+            [
+              3699.999999,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              1,
+              0.04
+            ],
+            [
+              3700.000001,
+              1,
+              0.039999999
+            ],
+            [
+              3700.0,
+              2,
+              0.1
+            ],
+            [
+              3700.0,
+              2,
+              0.099999999
+            ],
+            [
+              14501.0,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              0,
+              10
+            ],
+            [
+              3700.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.0,
+          "slow": 0.0,
+          "result": 1.6666666666666667
+        },
+        {
+          "start": 100.0,
+          "end": 14500.0,
+          "cutoff": 3700.0,
+          "events": [
+            [
+              3699.999999,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              1,
+              0.04
+            ],
+            [
+              3700.000001,
+              1,
+              0.039999999
+            ],
+            [
+              3700.0,
+              2,
+              0.1
+            ],
+            [
+              3700.0,
+              2,
+              0.099999999
+            ],
+            [
+              14501.0,
+              1,
+              0.5
+            ],
+            [
+              3700.0,
+              0,
+              10
+            ],
+            [
+              3700.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 1.0,
+          "slow": 1.0,
+          "result": 0.0
+        },
+        {
+          "start": 100.0,
+          "end": 18100.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              18101.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.04,
+          "slow": 0.1,
+          "result": 1.0
+        },
+        {
+          "start": 100.0,
+          "end": 18100.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              18101.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.040000001,
+          "slow": 0.100000001,
+          "result": 0.3333333333333333
+        },
+        {
+          "start": 100.0,
+          "end": 18100.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              18101.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.0,
+          "slow": 0.0,
+          "result": 1.6666666666666667
+        },
+        {
+          "start": 100.0,
+          "end": 18100.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              18101.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 1.0,
+          "slow": 1.0,
+          "result": 0.0
+        },
+        {
+          "start": 100.0,
+          "end": 28900.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              28901.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.04,
+          "slow": 0.1,
+          "result": 0.5
+        },
+        {
+          "start": 100.0,
+          "end": 28900.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              28901.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.040000001,
+          "slow": 0.100000001,
+          "result": 0.16666666666666666
+        },
+        {
+          "start": 100.0,
+          "end": 28900.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              28901.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 0.0,
+          "slow": 0.0,
+          "result": 0.8333333333333334
+        },
+        {
+          "start": 100.0,
+          "end": 28900.0,
+          "cutoff": 7300.0,
+          "events": [
+            [
+              7299.999999,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              1,
+              0.04
+            ],
+            [
+              7300.000001,
+              1,
+              0.039999999
+            ],
+            [
+              7300.0,
+              2,
+              0.1
+            ],
+            [
+              7300.0,
+              2,
+              0.099999999
+            ],
+            [
+              28901.0,
+              1,
+              0.5
+            ],
+            [
+              7300.0,
+              0,
+              10
+            ],
+            [
+              7300.0,
+              3,
+              10
+            ]
+          ],
+          "fast": 1.0,
+          "slow": 1.0,
+          "result": 0.0
+        }
+      ],
+      "searchFixture": {
+        "start": 100.0,
+        "end": 28900.0,
+        "events": [
+          [
+            8000,
+            1,
+            0.02
+          ],
+          [
+            8600,
+            2,
+            0.045
+          ],
+          [
+            9200,
+            1,
+            0.07
+          ],
+          [
+            9800,
+            2,
+            0.09500000000000001
+          ],
+          [
+            10400,
+            1,
+            0.12000000000000001
+          ],
+          [
+            11000,
+            2,
+            0.145
+          ],
+          [
+            11600,
+            1,
+            0.17
+          ],
+          [
+            12200,
+            2,
+            0.195
+          ],
+          [
+            12800,
+            1,
+            0.22
+          ],
+          [
+            13400,
+            2,
+            0.245
+          ],
+          [
+            14000,
+            1,
+            0.27
+          ],
+          [
+            14600,
+            2,
+            0.29500000000000004
+          ],
+          [
+            15200,
+            1,
+            0.32000000000000006
+          ],
+          [
+            15800,
+            2,
+            0.34500000000000003
+          ],
+          [
+            16400,
+            1,
+            0.37000000000000005
+          ],
+          [
+            17000,
+            2,
+            0.395
+          ],
+          [
+            17600,
+            1,
+            0.42000000000000004
+          ],
+          [
+            18200,
+            2,
+            0.44500000000000006
+          ],
+          [
+            18800,
+            1,
+            0.47000000000000003
+          ],
+          [
+            19400,
+            2,
+            0.49500000000000005
+          ],
+          [
+            20000,
+            1,
+            0.52
+          ],
+          [
+            20600,
+            2,
+            0.545
+          ],
+          [
+            21200,
+            1,
+            0.5700000000000001
+          ],
+          [
+            21800,
+            2,
+            0.5950000000000001
+          ],
+          [
+            22400,
+            1,
+            0.6200000000000001
+          ],
+          [
+            23000,
+            2,
+            0.645
+          ],
+          [
+            23600,
+            1,
+            0.67
+          ],
+          [
+            24200,
+            2,
+            0.6950000000000001
+          ],
+          [
+            24800,
+            1,
+            0.7200000000000001
+          ],
+          [
+            25400,
+            2,
+            0.7450000000000001
+          ]
+        ]
+      },
+      "searchCases": [
+        {
+          "target": 0.0,
+          "midpoint": 1.9999999999995453,
+          "slow": 1,
+          "fast": 0.9999999999995453,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 0.1,
+          "midpoint": 1.7199999999998,
+          "slow": 1,
+          "fast": 0.7199999999997999,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 1.0,
+          "midpoint": 1.4699999999998,
+          "slow": 1,
+          "fast": 0.4699999999997999,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 2.0,
+          "midpoint": 1.169999999999618,
+          "slow": 1,
+          "fast": 0.169999999999618,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 3.0,
+          "midpoint": 0.6449999999999818,
+          "slow": 0.6449999999999818,
+          "fast": 0,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 5.0,
+          "midpoint": 0.04499999999961801,
+          "slow": 0.04499999999961801,
+          "fast": 0,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 9.5,
+          "midpoint": 4.547473508864641e-13,
+          "slow": 4.547473508864641e-13,
+          "fast": 0,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 11.0,
+          "midpoint": 4.547473508864641e-13,
+          "slow": 4.547473508864641e-13,
+          "fast": 0,
+          "rateEvaluations": 41
+        },
+        {
+          "target": 20.0,
+          "midpoint": 4.547473508864641e-13,
+          "slow": 4.547473508864641e-13,
+          "fast": 0,
+          "rateEvaluations": 41
+        }
+      ]
+    },
+    "WatchAlarmLifecycleProbe.py": {
+      "scope": "Execute watch alarm entry guards, runtime-expiration predicate and dispatcher.\n\nRuns original 0x99334 including 0x36e74, and original dispatcher 0x9af74 with\noriginal movement filter and alarm decision. Phase-change callback supplies the\nseparately tested calibration result; it is not part of this probe's coverage.\nFoundation/Combine/Notification/Swift runtime accesses are synthetic fixtures.\n",
+      "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+      "casesPassed": 56,
+      "cases": [
+        {
+          "name": "deadline_-1e-06",
+          "input": {
+            "now": 1299.999999
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "deadline_0.0",
+          "input": {
+            "now": 1300.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "deadline_1e-06",
+          "input": {
+            "now": 1300.000001
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "expiration_-1.0",
+          "input": {
+            "expiry": 999.0
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "expiration_0.0",
+          "input": {
+            "expiry": 1000.0
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "expiration_299.999999",
+          "input": {
+            "expiry": 1299.9999990000001
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "expiration_300.0",
+          "input": {
+            "expiry": 1300.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "expiration_300.000001",
+          "input": {
+            "expiry": 1300.0000009999999
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "expiration_1000.0",
+          "input": {
+            "expiry": 2000.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": false,
+            "deadline": null,
+            "has_delegate": false,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": false,
+            "deadline": null,
+            "has_delegate": true,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": false,
+            "deadline": 900.0,
+            "has_delegate": false,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": false,
+            "deadline": 900.0,
+            "has_delegate": true,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": true,
+            "deadline": null,
+            "has_delegate": false,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": true,
+            "deadline": null,
+            "has_delegate": true,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": true,
+            "deadline": 900.0,
+            "has_delegate": false,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_alarm_or_deadline",
+          "input": {
+            "has_alarm": true,
+            "deadline": 900.0,
+            "has_delegate": true,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "missing_runtime",
+          "input": {
+            "has_delegate": false,
+            "has_runtime": false,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_runtime",
+          "input": {
+            "has_delegate": false,
+            "has_runtime": true,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "missing_runtime",
+          "input": {
+            "has_delegate": true,
+            "has_runtime": false,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "missing_runtime",
+          "input": {
+            "has_delegate": true,
+            "has_runtime": true,
+            "expiry": 1001.0
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 0,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_0_delta_-1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 0,
+            "now": 699.999999,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 0,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_0_delta_-1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 0,
+            "now": 699.999999,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 0,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_0_delta_0.0_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 0,
+            "now": 700.0,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 0,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_0_delta_0.0_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 0,
+            "now": 700.0,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 0,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_0_delta_1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 0,
+            "now": 700.000001,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 0,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_0_delta_1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 0,
+            "now": 700.000001,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 0,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_1_delta_-1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 699.999999,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_1_delta_-1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 699.999999,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_1_delta_0.0_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 700.0,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_1_delta_0.0_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 700.0,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_1_delta_1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 700.000001,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_1_delta_1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 700.000001,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_2_delta_-1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 2,
+            "now": 699.999999,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_2_delta_-1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 2,
+            "now": 699.999999,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_2_delta_0.0_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 2,
+            "now": 700.0,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_2_delta_0.0_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 2,
+            "now": 700.0,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_2_delta_1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 2,
+            "now": 700.000001,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_2_delta_1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 2,
+            "now": 700.000001,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_3_delta_-1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 3,
+            "now": 699.999999,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 3,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_3_delta_-1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 3,
+            "now": 699.999999,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 3,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_3_delta_0.0_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 3,
+            "now": 700.0,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 3,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_3_delta_0.0_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 3,
+            "now": 700.0,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 3,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_3_delta_1e-06_fired_False",
+          "input": {
+            "dispatch": true,
+            "phase": 3,
+            "now": 700.000001,
+            "fired": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_3_delta_1e-06_fired_True",
+          "input": {
+            "dispatch": true,
+            "phase": 3,
+            "now": 700.000001,
+            "fired": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "phase_dates",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "prearmed": null,
+            "armed": 700.0,
+            "now": 700.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_dates",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "prearmed": 700.0,
+            "armed": null,
+            "now": 700.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_dates",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "prearmed": 699.0,
+            "armed": 701.0,
+            "now": 700.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 3,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              3
+            ],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "phase_dates",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "prearmed": 701.0,
+            "armed": 699.0,
+            "now": 700.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 1,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "notification_missing_or_wrong_type",
+          "input": {
+            "dispatch": true,
+            "has_notification": false,
+            "cast_valid": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "notification_missing_or_wrong_type",
+          "input": {
+            "dispatch": true,
+            "has_notification": true,
+            "cast_valid": false
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [],
+            "decisionCalls": 0,
+            "filterCalls": 0,
+            "runtimeCalls": 0
+          }
+        },
+        {
+          "name": "dispatcher_deadline",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 1299.999999
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "dispatcher_deadline",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 1300.0
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "dispatcher_deadline",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "now": 1300.000001
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": -1.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "dispatcher_sensitive",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "active": false,
+            "intensity": 0.5,
+            "sensitive": true
+          },
+          "result": {
+            "fire": false,
+            "last": null,
+            "phase": 2,
+            "fired": false,
+            "lastTick": -1.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        },
+        {
+          "name": "dispatcher_sensitive",
+          "input": {
+            "dispatch": true,
+            "phase": 1,
+            "active": true,
+            "intensity": 0.5,
+            "sensitive": true
+          },
+          "result": {
+            "fire": true,
+            "last": null,
+            "phase": 2,
+            "fired": true,
+            "lastTick": 1000.0,
+            "transitions": [
+              3,
+              2
+            ],
+            "decisionCalls": 1,
+            "filterCalls": 1,
+            "runtimeCalls": 1
+          }
+        }
+      ]
+    }
+  }
+}

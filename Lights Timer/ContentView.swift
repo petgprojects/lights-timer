@@ -9,7 +9,6 @@ struct ContentView: View {
     @Environment(SmartWakeCoordinator.self) private var smartWakeCoordinator
     @Environment(WatchConnectivityService.self) private var watchConnectivity
     @Environment(HealthKitAuthorizationService.self) private var healthKitAuth
-    @Environment(SmartWakeCalibrationService.self) private var smartWakeCalibration
 
     var body: some View {
         NavigationStack {
@@ -22,7 +21,6 @@ struct ContentView: View {
                 phoneLogStore.log("APP", "Refreshing schedules, watch sync, and watch status on active scene")
                 Task {
                     await scheduleEngine.onAppActive(modelContext: modelContext)
-                    await smartWakeCalibration.refreshCalibrationIfNeeded()
                 }
                 smartWakeCoordinator.syncSchedulesToWatch(modelContext: modelContext)
                 smartWakeCoordinator.resetDailyState()

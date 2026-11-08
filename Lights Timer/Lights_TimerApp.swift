@@ -10,9 +10,8 @@ struct Lights_TimerApp: App {
     @State private var scheduleEngine: ScheduleEngine
     @State private var watchConnectivity: WatchConnectivityService
     @State private var smartWakeCoordinator: SmartWakeCoordinator
-    @State private var smartWakeSettings: SmartWakeSettingsStore
     @State private var healthKitAuth: HealthKitAuthorizationService
-    @State private var smartWakeCalibration: SmartWakeCalibrationService
+    @State private var smartWakeArchive: SmartWakeOccurrenceArchiveService
     @State private var watchLogArchive: WatchLogArchiveService
 
     init() {
@@ -27,17 +26,14 @@ struct Lights_TimerApp: App {
             lightController: controller,
             logStore: phoneLogStore
         )
-        let smartWakeSettings = SmartWakeSettingsStore()
         let connectivity = WatchConnectivityService(logStore: phoneLogStore)
         let watchLogArchive = WatchLogArchiveService(logStore: phoneLogStore)
-        let smartWakeCalibration = SmartWakeCalibrationService(logStore: phoneLogStore)
+        let smartWakeArchive = SmartWakeOccurrenceArchiveService(logStore: phoneLogStore)
         let coordinator = SmartWakeCoordinator(
             scheduleEngine: engine,
             watchConnectivity: connectivity,
             modelContainer: container,
-            logStore: phoneLogStore,
-            settingsStore: smartWakeSettings,
-            calibrationService: smartWakeCalibration
+            logStore: phoneLogStore
         )
         let healthKitAuth = HealthKitAuthorizationService(logStore: phoneLogStore)
 
@@ -55,29 +51,15 @@ struct Lights_TimerApp: App {
         _scheduleEngine = State(initialValue: engine)
         _watchConnectivity = State(initialValue: connectivity)
         _smartWakeCoordinator = State(initialValue: coordinator)
-        _smartWakeSettings = State(initialValue: smartWakeSettings)
         _healthKitAuth = State(initialValue: healthKitAuth)
-        _smartWakeCalibration = State(initialValue: smartWakeCalibration)
+        _smartWakeArchive = State(initialValue: smartWakeArchive)
         _watchLogArchive = State(initialValue: watchLogArchive)
 
         connectivity.onWatchLogFileReceived = { [weak watchLogArchive] fileURL, metadata in
             watchLogArchive?.importTransferredLog(from: fileURL, metadata: metadata)
         }
-        connectivity.onOccurrenceSummaryReceived = { [weak smartWakeCalibration] summary in
-            smartWakeCalibration?.importOccurrenceSummary(summary)
-        }
-
-        smartWakeSettings.onPowerModeChanged = { [weak coordinator] powerMode in
-            phoneLogStore.log("APP", "Smart Wake power mode changed to \(powerMode.rawValue)")
-            guard let coordinator else { return }
-            let context = ModelContext(container)
-            coordinator.syncSchedulesToWatch(modelContext: context)
-        }
-
-        smartWakeCalibration.onProfileUpdated = { [weak coordinator] _ in
-            guard let coordinator else { return }
-            let context = ModelContext(container)
-            coordinator.syncSchedulesToWatch(modelContext: context)
+        connectivity.onOccurrenceSummaryReceived = { [weak smartWakeArchive] summary in
+            smartWakeArchive?.importOccurrenceSummary(summary)
         }
 
         phoneLogStore.log("APP", "Lights Timer iPhone app initialized")
@@ -91,9 +73,8 @@ struct Lights_TimerApp: App {
                 .environment(scheduleEngine)
                 .environment(watchConnectivity)
                 .environment(smartWakeCoordinator)
-                .environment(smartWakeSettings)
                 .environment(healthKitAuth)
-                .environment(smartWakeCalibration)
+                .environment(smartWakeArchive)
                 .environment(watchLogArchive)
         }
         .modelContainer(modelContainer)

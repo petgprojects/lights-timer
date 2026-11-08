@@ -1,0 +1,1327 @@
+{
+  "scope": "Original complete ARM64 extendedFilterForArmedPhase instructions at 0x10009a704, with Date, Swift metadata/copy and logging shims. Synthetic movement input and field offsets; no sensor hardware or app scheduling.",
+  "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+  "casesPassed": 72,
+  "cases": [
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": -1.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": -1.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": 990.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": 990.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": 990.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": 990.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": 989.999999,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": 989.999999,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": 989.999999,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": 989.999999,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": 999.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": 999.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "last": 999.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.039999999,
+        "duration": 0.0,
+        "last": 999.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": -1.0,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": -1.0,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": 990.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": 990.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": 989.999999,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": 989.999999,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": 999.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "last": 999.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.04,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": -1.0,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": -1.0,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": 990.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": 990.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": 989.999999,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": 989.999999,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": 999.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "last": 999.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.040000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": -1.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": -1.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 990.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": 990.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 990.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": 990.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 989.999999,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": 989.999999,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 989.999999,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": 989.999999,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 999.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": 999.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "last": 999.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.099999999,
+        "duration": 0.0,
+        "last": 999.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": -1.0,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": -1.0,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 990.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 990.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 989.999999,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 989.999999,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 999.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "last": 999.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.1,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": -1.0,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": -1.0,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 990.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 990.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 989.999999,
+        "new": false
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 989.999999,
+        "new": true
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 999.0,
+        "new": false
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "last": 999.0,
+        "new": true
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.100000001,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": false,
+        "new": false,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": false,
+        "new": false,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": false,
+        "new": true,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": false,
+        "new": true,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": true,
+        "new": false,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": true,
+        "new": false,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": true,
+        "new": true,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 1.0,
+        "active": true,
+        "new": true,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": false,
+        "new": false,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": false,
+        "new": false,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": false,
+        "new": true,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": false,
+        "new": true,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": true,
+        "new": false,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": true,
+        "new": false,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": true,
+        "new": true,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 1.0,
+        "slow": 0.1,
+        "active": true,
+        "new": true,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": false,
+        "new": false,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": false,
+        "new": false,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": false,
+        "new": true,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": false,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": false,
+        "new": true,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": true,
+        "new": false,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": true,
+        "new": false,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": true,
+        "new": true,
+        "delayed": false,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": true,
+        "active": true,
+        "delayed": false,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": 1000.0,
+        "date": 1000.0
+      }
+    },
+    {
+      "input": {
+        "fast": 0.04,
+        "slow": 1.0,
+        "active": true,
+        "new": true,
+        "delayed": true,
+        "intensity": 0.2
+      },
+      "result": {
+        "new": false,
+        "active": false,
+        "delayed": true,
+        "intensity": 0.2,
+        "duration": 0.0,
+        "last": -1.0,
+        "date": 1000.0
+      }
+    }
+  ]
+}

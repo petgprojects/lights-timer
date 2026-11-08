@@ -1,0 +1,99 @@
+{
+  "binarySHA256": "81779e6e6be6b5b1752875e63bd4ac158db0463f2be51bf67bddd7a1ab7b0379",
+  "scope": "Pure SDK arithmetic executed in an ARM64 emulator; no watch code executed.",
+  "interpolation": {
+    "address": "0xF3CB4",
+    "casesPassed": 103
+  },
+  "largeMovementThreshold": {
+    "address": "0xFE818",
+    "cases": [
+      {
+        "windowFraction": 0.0,
+        "instructionResult": 20.0
+      },
+      {
+        "windowFraction": 0.3,
+        "instructionResult": 20.0
+      },
+      {
+        "windowFraction": 0.475,
+        "instructionResult": 18.125
+      },
+      {
+        "windowFraction": 0.65,
+        "instructionResult": 12.499999999999996
+      },
+      {
+        "windowFraction": 0.825,
+        "instructionResult": 6.875000000000002
+      },
+      {
+        "windowFraction": 1.0,
+        "instructionResult": 5.0
+      },
+      {
+        "windowFraction": 1.2,
+        "instructionResult": 5.0
+      }
+    ],
+    "missingRangeResult": 10.0
+  },
+  "percentile": {
+    "address": "0xFE95C",
+    "cases": [
+      {
+        "fraction": 0.0,
+        "instructionResult": 1.0
+      },
+      {
+        "fraction": 0.5,
+        "instructionResult": 6.0
+      },
+      {
+        "fraction": 0.7,
+        "instructionResult": 8.0
+      },
+      {
+        "fraction": 0.9,
+        "instructionResult": 10.0
+      },
+      {
+        "fraction": 1.0,
+        "instructionResult": 10.0
+      }
+    ]
+  },
+  "biquadCoefficients_b0_b1_b2_a1_a2": [
+    [
+      0.3654502711939662,
+      0.7309005423879325,
+      0.3654502711939662,
+      0.342548469256106,
+      0.20680325470874872
+    ],
+    [
+      1.0,
+      -2.0,
+      1.0,
+      -1.889056624844439,
+      0.8952299639500302
+    ]
+  ],
+  "constructorConstants": {
+    "internalSamplingHz": 40.0,
+    "gridStepSeconds": 0.025,
+    "thresholdMultiplier": 6.0,
+    "holdMultiplier": 1.5,
+    "minimumEventSeconds": 0.6,
+    "envelopeSeconds": 0.15,
+    "noiseWindowSeconds": 120.0,
+    "noiseSamplingHz": 10.0,
+    "noiseUpdateSeconds": 0.5,
+    "warmupSeconds": 10.0,
+    "gapResetSeconds": 1.0,
+    "maximumGapWithinEventSeconds": 1.0,
+    "maximumEventSeconds": 30.0,
+    "minimumIntervalBetweenEventsSeconds": 0.0
+  }
+}

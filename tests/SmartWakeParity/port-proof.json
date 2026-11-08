@@ -1,0 +1,48 @@
+{
+  "status": "passed",
+  "port_comparisons": 13870,
+  "vector_cases": 764,
+  "comparisons_by_kind": {
+    "detector": 13061,
+    "binner": 11,
+    "parameters": 26,
+    "history": 35,
+    "filter": 152,
+    "decision": 486,
+    "alarm": 94,
+    "runtime": 5
+  },
+  "failures": [],
+  "floating_point_tolerance": {
+    "relative": 1e-12,
+    "absolute": 1e-10
+  },
+  "integer_boolean_phase_reason_comparisons": "exact",
+  "source_sha256": {
+    "Lights Timer Watch App/Services/RecoveredMovementCore.swift": "e7aab69a96392060d42015a7bbea2dcd147b747ff761a79c4ce7f31f651bad9d",
+    "plans/sleep-cycle-watch/WatchAlgorithmReference.py": "c5bf4f010e5f0fbb2ae1da7320d1f5e65fb8cab6ed87432cc11b0a26a235db7b",
+    "tests/SmartWakeParity/main.swift": "ba6115b20e114512ec672fb4aea1810a4a25aacf502f9c27eb0d521eb28f296a",
+    "tests/SmartWakeParity/run.py": "b28a2cbc28d13744c7cac64f8342a8ec731b86a627ec0a1614c60da5aa539b4c"
+  },
+  "swift_version": "Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)\nTarget: arm64-apple-macosx27.0.0",
+  "compile_flags": [
+    "-swift-version",
+    "5",
+    "-default-isolation",
+    "MainActor"
+  ],
+  "scope": "Native macOS replay of actual production Swift core against independent Python reference. Full retained detector state compared on every sample. Codable restoration included. No vendor binary or device used.",
+  "original_instruction_reconstruction_checks": 6654,
+  "original_instruction_checks_are_not_included_in_port_count": true,
+  "reference_extensions": [
+    "Stop lifecycle semantics and runtime <300-second predicate are specified in ALARM.md/RUNTIME.md; other expected outputs call WatchAlgorithmReference.py directly."
+  ],
+  "excluded": [
+    "watchOS recovery callbacks",
+    "physical sensor cadence and delivery",
+    "overnight accuracy and battery",
+    "haptics",
+    "HomeKit",
+    "WCSession delivery"
+  ]
+}

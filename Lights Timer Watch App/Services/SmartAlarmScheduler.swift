@@ -50,6 +50,7 @@ final class SmartAlarmScheduler: NSObject {
     private(set) var isSceneActive = false
 
     private var extendedSession: WKExtendedRuntimeSession?
+    private var monitoringDispatchToken = UUID()
     private var pendingSchedule: PendingWake?
     private var recoveredRunningBackstopWake: PendingWake?
 
@@ -64,15 +65,10 @@ final class SmartAlarmScheduler: NSObject {
     private let sessionController: SmartWakeSessionController
     private let sessionManager: WatchSessionManager
     private let logStore: SmartWakeLogStore
+    private let completionStore = SmartWakeCompletionStore()
     private let pendingWakeStore: SmartWakePendingWakeStore
 
-    /// Conservative budget for the extended runtime session. Apple grants ~30 min
-    /// for smart-alarm sessions; we use 25 min to leave a safety margin for
-    /// force-fire at wake time.
-    private let safeSessionBudget: TimeInterval = 25 * 60
-
-    /// Small buffer before the wake window start for workout/query setup.
-    private let sessionSetupBuffer: TimeInterval = 120
+    // Timing policy is shared with executable replay checks in SmartWakeExecutionPolicy.
     private let armingHorizon: TimeInterval = 35 * 3600
     var onStatusChanged: (() -> Void)?
 
@@ -301,14 +297,12 @@ final class SmartAlarmScheduler: NSObject {
                     )
                 }
             } else {
-                recoveredRunningBackstopWake = pendingWake(from: record)
-                pendingSchedule = nil
-                scheduledMonitoringDate = nil
-                armingState = .backstopActive(wakeUpTime: record.wakeUpTime)
-                logStore.log(
-                    "SCHEDULER",
-                    "Recovered running session after wake time; keeping it as a backstop without restarting monitoring",
-                    level: .warning
+                // The completion ledger already excluded fired occurrences.
+                // A genuine overdue relaunch must still deliver the alarm.
+                logStore.log("SCHEDULER", "Recovered uncompleted wake after deadline; enforcing exact wake", level: .warning)
+                startMonitoringNow(
+                    schedule: record.schedule, wakeUpTime: record.wakeUpTime,
+                    windowStart: record.windowStart, armedAt: record.armedAt
                 )
             }
 
@@ -739,9 +733,8 @@ final class SmartAlarmScheduler: NSObject {
         )
     }
 
-    /// Best-effort: cancel the current premature session and re-schedule at the
-    /// correct time. If watchOS refuses start(at:) from a background context,
-    /// the wake falls back to the HomeKit wake-time scene.
+    /// Cancel a premature session and reschedule only in true foreground.
+    /// In background, persist an explicit rearm placeholder instead.
     private func rescheduleAlarmSession(
         pending: PendingWake,
         correctStart: Date
@@ -764,10 +757,18 @@ final class SmartAlarmScheduler: NSObject {
             armedAt: pending.armedAt
         )
 
-        extendedSession = newSession
         currentSessionScheduleID = schedule.id
         currentSessionWakeTime = wakeUpTime
         pendingSchedule = newWake
+        guard isSceneActive else {
+            savePendingWakeRecord(for: newWake, isSessionScheduled: false)
+            scheduledMonitoringDate = nil
+            alarmSessionError = nil
+            armingState = .needsForegroundToArm(wakeUpTime: wakeUpTime)
+            logStore.log("SCHEDULER", "Premature runtime cannot be re-armed until true foreground", level: .warning)
+            return
+        }
+        extendedSession = newSession
         savePendingWakeRecord(for: newWake)
 
         newSession.start(at: correctStart)
@@ -819,6 +820,7 @@ final class SmartAlarmScheduler: NSObject {
             pendingWakeStore.clearPendingWakeRecord()
         }
 
+        monitoringDispatchToken = UUID()
         extendedSession = nil
         pendingSchedule = nil
         recoveredRunningBackstopWake = nil
@@ -867,6 +869,9 @@ final class SmartAlarmScheduler: NSObject {
             return
         }
 
+        guard !isCompletedOccurrence(scheduleID: schedule.id, wakeUpTime: wakeUpTime) else { return }
+        sessionController.establishDeadlineContext(schedule: schedule, wakeUpTime: wakeUpTime)
+
         // Ensure the scheduler always knows which wake is being monitored,
         // so handleWakeTriggered() can persist it into completedWakeOccurrence.
         // (The "already inside wake window" path in schedulesDidUpdate skips
@@ -901,8 +906,17 @@ final class SmartAlarmScheduler: NSObject {
             calibrationProfile: sessionManager.calibrationProfile
         )
 
+        sessionController.forceImmediateWakeCheck()
+        guard sessionController.sessionState != .triggered else { return }
+        monitoringDispatchToken = UUID()
+        let dispatchToken = monitoringDispatchToken
+
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, dispatchToken == self.monitoringDispatchToken,
+                  self.currentSessionScheduleID == schedule.id,
+                  self.currentSessionWakeTime == wakeUpTime,
+                  !self.isCompletedOccurrence(scheduleID: schedule.id, wakeUpTime: wakeUpTime),
+                  self.sessionController.sessionState != .triggered else { return }
             let didStartMonitoring = await self.sessionController.startMonitoring(
                 schedule: schedule,
                 wakeUpTime: wakeUpTime,
@@ -949,9 +963,7 @@ final class SmartAlarmScheduler: NSObject {
     /// Compute the session start time to maximize wake-window coverage within
     /// the smart-alarm session budget.
     private func computeSessionStart(windowStart: Date, wakeUpTime: Date) -> Date {
-        let idealStart = windowStart.addingTimeInterval(-sessionSetupBuffer)
-        let latestViableStart = wakeUpTime.addingTimeInterval(-safeSessionBudget)
-        return max(idealStart, latestViableStart)
+        SmartWakeExecutionPolicy.sessionStart(windowStart: windowStart, wakeUpTime: wakeUpTime)
     }
 
     /// One-time migration for persisted wakes saved with the old one-hour lead
@@ -1045,6 +1057,7 @@ final class SmartAlarmScheduler: NSObject {
     }
 
     private func isCompletedOccurrence(scheduleID: UUID, wakeUpTime: Date) -> Bool {
+        if completionStore.contains(scheduleID: scheduleID, wakeUpTime: wakeUpTime) { return true }
         guard let completedOccurrence = completedWakeOccurrence else { return false }
         return completedOccurrence.scheduleID == scheduleID
             && completedOccurrence.wakeUpTime == wakeUpTime
@@ -1215,6 +1228,10 @@ final class SmartAlarmScheduler: NSObject {
     ) -> SmartWakePendingWakeRecord? {
         guard let record = pendingWakeStore.loadPendingWakeRecord() else { return nil }
 
+        guard !completionStore.contains(scheduleID: record.schedule.id, wakeUpTime: record.wakeUpTime) else {
+            clearPersistedPendingWakeRecord(reason: "Occurrence already fired before relaunch")
+            return nil
+        }
         guard Date().timeIntervalSince(record.wakeUpTime) <= 7200 else {
             clearPersistedPendingWakeRecord(
                 reason: "\(reason); pending wake record is stale"
@@ -1340,6 +1357,9 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                 "Extended runtime session will expire soon",
                 level: .warning
             )
+            if self.sessionController.sessionState != .triggered {
+                self.sessionController.forceImmediateWakeCheck()
+            }
             if self.sessionController.isMonitoringStartupInProgress,
                self.sessionController.sessionState != .triggered {
                 self.logStore.log(
@@ -1384,6 +1404,12 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                 )
                 return
             }
+            self.monitoringDispatchToken = UUID()
+            // Also covers the scheduler-to-controller Task dispatch gap, before
+            // startMonitoring has set its startup flags.
+            if self.sessionController.sessionState != .triggered {
+                self.sessionController.forceImmediateWakeCheck()
+            }
             self.isAlarmSessionActive = false
             self.sessionController.isAlarmSessionActive = false
             self.extendedSession = nil
@@ -1427,7 +1453,8 @@ extension SmartAlarmScheduler: WKExtendedRuntimeSessionDelegate {
                 )
                 self.schedulesDidUpdate(self.sessionManager.activeSchedules)
             } else if (self.sessionController.isMonitoringActive
-                        || self.sessionController.isMonitoringStartupInProgress),
+                        || self.sessionController.isMonitoringStartupInProgress
+                        || self.sessionController.currentScheduleID != nil),
                       self.sessionController.sessionState != .triggered {
                 self.logStore.log(
                     "SCHEDULER",

@@ -1,0 +1,1121 @@
+{
+  "investigatedDate": "2026-11-07",
+  "scope": "Actual watch executable decrypted (ARM64 and ARM64_32), validated against original pre-encryption page hashes, reconstructed motion/alarm/calibration/runtime behavior, original ARM64 instruction tests, ARM64_32 static parity. Earlier failed debugger/simulator and separate SDK evidence retained as historical steps. Production Swift unchanged.",
+  "archive": {
+    "filename": "Sleep Cycle.ipa",
+    "sha256": "b5aa775f46e6ca42cfa50fb89a954a443dcdd5156032b45680215cd0498c4143",
+    "bytes": 239065298,
+    "version": "6.26.430",
+    "build": "28530",
+    "bundleIdentifier": "com.lexwarelabs.goodmorning"
+  },
+  "watch": {
+    "executablePath": "Payload/GoodMorning.app/Watch/SCWatch.app/PlugIns/SCWatchExtension.appex/SCWatchExtension",
+    "sha256": "00fd2426c370efbc537198b1967680d092370b45d75647a4e33727f1c5fa02b9",
+    "architectures": [
+      "arm64",
+      "arm64_32"
+    ],
+    "infoPlist": {
+      "CFBundleExecutable": "SCWatchExtension",
+      "CFBundleIdentifier": "com.lexwarelabs.goodmorning.watchkitapp.watchkitextension",
+      "CFBundleShortVersionString": "6.26.430",
+      "CFBundleVersion": "28530",
+      "MinimumOSVersion": "9.0",
+      "NSExtension": {
+        "NSExtensionAttributes": {
+          "WKAppBundleIdentifier": "com.lexwarelabs.goodmorning.watchkitapp"
+        },
+        "NSExtensionPointIdentifier": "com.apple.watchkit"
+      },
+      "NSMotionUsageDescription": "We use motion data to analyse your sleep patterns.",
+      "WKBackgroundModes": [
+        "alarm"
+      ]
+    },
+    "entitlements": {
+      "application-identifier": "HDPHG57L8V.com.lexwarelabs.goodmorning.watchkitapp.watchkitextension",
+      "com.apple.developer.team-identifier": "HDPHG57L8V",
+      "com.apple.security.application-groups": [
+        "group.com.lexwarelabs.goodmorning"
+      ]
+    },
+    "encryptionCommands": [
+      {
+        "command": "LC_ENCRYPTION_INFO_64",
+        "cryptoff": 16384,
+        "cryptsize": 2211840,
+        "cryptid": 1
+      },
+      {
+        "command": "LC_ENCRYPTION_INFO",
+        "cryptoff": 16384,
+        "cryptsize": 2211840,
+        "cryptid": 1
+      }
+    ],
+    "linkedLibraries": [
+      "/usr/lib/libz.1.dylib (compatibility version 1.0.0, current version 1.2.12)",
+      "/System/Library/Frameworks/WatchKit.framework/WatchKit (compatibility version 1.0.0, current version 1.0.0)",
+      "/System/Library/Frameworks/Foundation.framework/Foundation (compatibility version 300.0.0, current version 5027.0.69)",
+      "/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)",
+      "/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)",
+      "/System/Library/Frameworks/Accelerate.framework/Accelerate (compatibility version 1.0.0, current version 4.0.0)",
+      "/System/Library/Frameworks/AppIntents.framework/AppIntents (compatibility version 0.0.0, current version 301.0.51)",
+      "/System/Library/Frameworks/Charts.framework/Charts (compatibility version 1.0.0, current version 8.0.84)",
+      "/System/Library/Frameworks/ClockKit.framework/ClockKit (compatibility version 1.0.0, current version 1.0.0)",
+      "/System/Library/Frameworks/Combine.framework/Combine (compatibility version 1.0.0, current version 3023.0.0)",
+      "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation (compatibility version 150.0.0, current version 5027.0.69)",
+      "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics (compatibility version 64.0.0, current version 2049.0.0)",
+      "/System/Library/Frameworks/CoreMotion.framework/CoreMotion (compatibility version 1.0.0, current version 3185.0.6)",
+      "/System/Library/Frameworks/CoreText.framework/CoreText (compatibility version 1.0.0, current version 904.0.0)",
+      "/System/Library/Frameworks/SpriteKit.framework/SpriteKit (compatibility version 1.0.0, current version 53.0.2)",
+      "/System/Library/Frameworks/SwiftUI.framework/SwiftUI (compatibility version 1.0.0, current version 8.0.84)",
+      "/System/Library/Frameworks/UIKit.framework/UIKit (compatibility version 1.0.0, current version 9127.0.84)",
+      "/System/Library/Frameworks/WatchConnectivity.framework/WatchConnectivity (compatibility version 1.0.0, current version 224.100.1)",
+      "/System/Library/Frameworks/WidgetKit.framework/WidgetKit (compatibility version 1.0.0, current version 749.0.0)",
+      "/System/Library/Frameworks/_SpriteKit_SwiftUI.framework/_SpriteKit_SwiftUI (compatibility version 1.0.0, current version 53.0.2)",
+      "/usr/lib/libcompression.dylib (compatibility version 1.0.0, current version 1.0.0)",
+      "/usr/lib/swift/libswiftAccelerate.dylib (compatibility version 1.0.0, current version 82.0.0, weak)",
+      "/usr/lib/swift/libswiftCompression.dylib (compatibility version 1.0.0, current version 18.0.0, weak)",
+      "/usr/lib/swift/libswiftCore.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "/usr/lib/swift/libswiftCoreAudio.dylib (compatibility version 1.0.0, current version 482.102.0, weak)",
+      "/usr/lib/swift/libswiftCoreFoundation.dylib (compatibility version 1.0.0, current version 120.100.0)",
+      "/usr/lib/swift/libswiftCoreLocation.dylib (compatibility version 1.0.0, current version 57.0.0, weak)",
+      "/usr/lib/swift/libswiftDispatch.dylib (compatibility version 1.0.0, current version 1605.0.2)",
+      "/usr/lib/swift/libswiftIntents.dylib (compatibility version 1.0.0, current version 12.0.0, weak)",
+      "/usr/lib/swift/libswiftOSLog.dylib (compatibility version 1.0.0, current version 10.0.0, weak)",
+      "/usr/lib/swift/libswiftObjectiveC.dylib (compatibility version 1.0.0, current version 973.1.0)",
+      "/usr/lib/swift/libswiftQuartzCore.dylib (compatibility version 1.0.0, current version 5.0.0, weak)",
+      "/usr/lib/swift/libswiftSceneKit.dylib (compatibility version 1.0.0, current version 1.2.0, weak)",
+      "/usr/lib/swift/libswiftSpatial.dylib (compatibility version 1.0.0, current version 1.0.0, weak)",
+      "/usr/lib/swift/libswiftSpriteKit.dylib (compatibility version 1.0.0, current version 1.2.0, weak)",
+      "/usr/lib/swift/libswiftUniformTypeIdentifiers.dylib (compatibility version 1.0.0, current version 919.0.1, weak)",
+      "/usr/lib/swift/libswiftWatchKit.dylib (compatibility version 1.0.0, current version 9.0.0)",
+      "/usr/lib/swift/libswiftXPC.dylib (compatibility version 1.0.0, current version 167.0.2, weak)",
+      "/usr/lib/swift/libswift_Builtin_float.dylib (compatibility version 0.0.0, current version 0.0.0, weak)",
+      "/usr/lib/swift/libswift_Concurrency.dylib (compatibility version 0.0.0, current version 0.0.0)",
+      "/usr/lib/swift/libswiftos.dylib (compatibility version 1.0.0, current version 1090.0.0)",
+      "/usr/lib/swift/libswiftsimd.dylib (compatibility version 1.0.0, current version 25.0.0, weak)",
+      "/usr/lib/swift/libswiftDarwin.dylib (compatibility version 1.0.0, current version 428.0.10, weak)",
+      "/usr/lib/swift/libswiftUIKit.dylib (compatibility version 1.0.0, current version 1.0.0, weak)"
+    ],
+    "selectedImports": [
+      "_OBJC_CLASS_$_WKExtendedRuntimeSession  (from WatchKit)",
+      "_vDSP_meanvD  (from Accelerate)",
+      "_OBJC_CLASS_$_CMMotionManager  (from CoreMotion)",
+      "_OBJC_CLASS_$_CMRecordedAccelerometerData  (from CoreMotion)",
+      "_OBJC_CLASS_$_CMSensorDataList  (from CoreMotion)",
+      "_OBJC_CLASS_$_CMSensorRecorder  (from CoreMotion)",
+      "_OBJC_CLASS_$_WCSession  (from WatchConnectivity)"
+    ],
+    "healthKitFoundInImports": false,
+    "coreMLFoundInImports": false,
+    "selectedExports": [
+      "variable initialization expression of SCWatchExtension.MovementFindingDetectorWatch.(movementFindingActive in _72B66B393FC0A23F263D7FDAEF555E8A) : Swift.Bool",
+      "SCWatchExtension.MovementFindingDetectorWatch.stop(at: Foundation.Date?) -> ()",
+      "SCWatchExtension.MovementFindingDetectorWatch.start() -> ()",
+      "variable initialization expression of SCWatchExtension.MovementFindingDetectorWatch.(analyzer in _72B66B393FC0A23F263D7FDAEF555E8A) : GMFoundationWatch.FastMovementAnalyzer?",
+      "SCWatchExtension.MovementFindingDetectorWatch.__allocating_init() -> SCWatchExtension.MovementFindingDetectorWatch",
+      "SCWatchExtension.MovementFindingDetectorWatch.init() -> SCWatchExtension.MovementFindingDetectorWatch",
+      "GMFoundationWatch.WCPayloads.AppContext.DeviceSessionEnd.init(value: Foundation.Date) -> GMFoundationWatch.WCPayloads.AppContext.DeviceSessionEnd",
+      "GMFoundationWatch.WCPayloads.AppContext.SnoozeTimePayload.init(value: Swift.Int) -> GMFoundationWatch.WCPayloads.AppContext.SnoozeTimePayload",
+      "GMFoundationWatch.WCPayloads.AppContext.DeviceSessionStart.init(value: Foundation.Date) -> GMFoundationWatch.WCPayloads.AppContext.DeviceSessionStart",
+      "GMFoundationWatch.WCPayloads.AppContext.DebugEnabledPayload.init(value: Swift.Bool) -> GMFoundationWatch.WCPayloads.AppContext.DebugEnabledPayload",
+      "GMFoundationWatch.WCPayloads.AppContext.WakeupWindowPayload.init(value: Swift.Double) -> GMFoundationWatch.WCPayloads.AppContext.WakeupWindowPayload",
+      "GMFoundationWatch.WCPayloads.AppContext.DumpWholeNightPayload.init(value: Swift.Bool) -> GMFoundationWatch.WCPayloads.AppContext.DumpWholeNightPayload",
+      "GMFoundationWatch.WCPayloads.AppContext.DeviceSessionAlarmFired.init(value: Foundation.Date) -> GMFoundationWatch.WCPayloads.AppContext.DeviceSessionAlarmFired",
+      "GMFoundationWatch.WCPayloads.AppContext.SleepScoreEnabledPayload.init(value: Swift.Bool) -> GMFoundationWatch.WCPayloads.AppContext.SleepScoreEnabledPayload",
+      "GMFoundationWatch.WCPayloads.AppContext.EssentialProductConsentPayload.init(value: Swift.Bool) -> GMFoundationWatch.WCPayloads.AppContext.EssentialProductConsentPayload",
+      "GMFoundationWatch.WCPayloads.AppContext.JournalNotificationsEnabledPayload.init(value: Swift.Bool) -> GMFoundationWatch.WCPayloads.AppContext.JournalNotificationsEnabledPayload",
+      "GMFoundationWatch.WCPayloads.SessionRelated.UserSnoozedPayload.init(value: Foundation.Date?) -> GMFoundationWatch.WCPayloads.SessionRelated.UserSnoozedPayload",
+      "GMFoundationWatch.WCPayloads.SessionRelated.UserStartedPayload.init(value: Foundation.Date?) -> GMFoundationWatch.WCPayloads.SessionRelated.UserStartedPayload",
+      "GMFoundationWatch.WCPayloads.SessionRelated.UserStoppedPayload.init(value: Swift.Double?) -> GMFoundationWatch.WCPayloads.SessionRelated.UserStoppedPayload",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.SessionProgressionPayload.init(value: Swift.Int) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.SessionProgressionPayload",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.HardwarePayload.init(value: Swift.String?) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.HardwarePayload",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.OSVersionPayload.init(value: Swift.String?) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.OSVersionPayload",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.AvgProcessingRate.init(value: Swift.Int) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.AvgProcessingRate",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.SessionsStatistics.init(value: Foundation.Data?) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.SessionsStatistics",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.AvgBgtProcessingRate.init(value: Swift.Int) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.AvgBgtProcessingRate",
+      "GMFoundationWatch.WCPayloads.SessionStatsRelated.TransferFinishedPayload.init(value: Swift.Bool) -> GMFoundationWatch.WCPayloads.SessionStatsRelated.TransferFinishedPayload",
+      "GMFoundationWatch.WCPayloads.Misc.TimestampPayload.init(value: Foundation.Date?) -> GMFoundationWatch.WCPayloads.Misc.TimestampPayload",
+      "GMFoundationWatch.WCPayloads.Misc.WakeupIosPayload.init() -> GMFoundationWatch.WCPayloads.Misc.WakeupIosPayload",
+      "GMFoundationWatch.WCPayloads.Misc.AppContextRequestPayload.init() -> GMFoundationWatch.WCPayloads.Misc.AppContextRequestPayload",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(lastTickWhenMovementStarted in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double?",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(secondsOfNonMovementNeededForNewMovement in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(lastRADiff in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "GMFoundationWatch.MovementAnalyzer.__allocating_init(initialDLimit: Swift.Double) -> GMFoundationWatch.MovementAnalyzer",
+      "GMFoundationWatch.MovementAnalyzer.init(initialDLimit: Swift.Double) -> GMFoundationWatch.MovementAnalyzer",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(calibrationPhase in _FB312535C1C759DB9A0FD9F488B0638C) : GMFoundationWatch.MovementAnalyzer.CalibrationPhase",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(changePhaseRefTime in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "GMFoundationWatch.MovementAnalyzer.getCalibratedDLimit() -> Swift.Double?",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(oldAcceleratorPoint in _FB312535C1C759DB9A0FD9F488B0638C) : GMFoundationWatch.Vector3d?",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(rollingAverageLength in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Int",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(previousRollingAverage in _FB312535C1C759DB9A0FD9F488B0638C) : GMFoundationWatch.Vector3d?",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(calibrationStartedRefTime in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(oldAcceleratorPointLongTerm in _FB312535C1C759DB9A0FD9F488B0638C) : GMFoundationWatch.Vector3d?",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(dLimitFoundDuringCalibrationRun in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(timeBetweenAccelerometerCalibrations in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "GMFoundationWatch.MovementAnalyzer.enoughTimePassedForReliableCalibration(at: Foundation.Date) -> Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(lowestDLimitFoundDuringCalibrationRuns in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(minimumTimeDuringNightForAccelerometerCalibration in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Double",
+      "GMFoundationWatch.MovementAnalyzer.dLimit.getter : Swift.Double",
+      "direct field offset for GMFoundationWatch.MovementAnalyzer.dLimit : Swift.Double",
+      "GMFoundationWatch.MovementAnalyzer.update(movement: GMFoundationWatch.Movement2) -> GMFoundationWatch.DecoratedMovement",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(counter in _FB312535C1C759DB9A0FD9F488B0638C) : Swift.Int",
+      "variable initialization expression of GMFoundationWatch.MovementAnalyzer.(history in _FB312535C1C759DB9A0FD9F488B0638C) : [GMFoundationWatch.Vector3d]",
+      "GMFoundationWatch.DecoratedMovement.newMovement.modify : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.newMovement.getter : Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.DecoratedMovement.newMovement : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.newMovement.setter : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.delayedMovement.modify : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.delayedMovement.getter : Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.DecoratedMovement.delayedMovement : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.delayedMovement.setter : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.init(acceleration: GMFoundationWatch.Vector3d, at: Foundation.Date, duration: Swift.Double) -> GMFoundationWatch.DecoratedMovement",
+      "GMFoundationWatch.DecoratedMovement.acceleration.getter : GMFoundationWatch.Vector3d",
+      "GMFoundationWatch.DecoratedMovement.movementInProgress.modify : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.movementInProgress.getter : Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.DecoratedMovement.movementInProgress : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.movementInProgress.setter : Swift.Bool",
+      "GMFoundationWatch.DecoratedMovement.init(x: Swift.Double, y: Swift.Double, z: Swift.Double, at: Foundation.Date, duration: Swift.Double) -> GMFoundationWatch.DecoratedMovement",
+      "GMFoundationWatch.DecoratedMovement.init(from: GMFoundationWatch.Movement2, duration: Swift.Double) -> GMFoundationWatch.DecoratedMovement",
+      "GMFoundationWatch.DecoratedMovement.time.getter : Foundation.Date",
+      "GMFoundationWatch.DecoratedMovement.duration.getter : Swift.Double",
+      "GMFoundationWatch.DecoratedMovement.intensity.modify : Swift.Double",
+      "GMFoundationWatch.DecoratedMovement.intensity.getter : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.DecoratedMovement.intensity : Swift.Double",
+      "GMFoundationWatch.DecoratedMovement.intensity.setter : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.AccelerometerService.(lastRestart in _44644BBA41356519007FE7AFF2756B9B) : Foundation.Date?",
+      "variable initialization expression of GMFoundationWatch.AccelerometerService.(motionQueue in _44644BBA41356519007FE7AFF2756B9B) : __C.NSOperationQueue",
+      "variable initialization expression of GMFoundationWatch.AccelerometerService.(motionManager in _44644BBA41356519007FE7AFF2756B9B) : __C.CMMotionManager",
+      "variable initialization expression of GMFoundationWatch.AccelerometerService.(updateFrequency in _44644BBA41356519007FE7AFF2756B9B) : Swift.Double?",
+      "GMFoundationWatch.AccelerometerService.generateMovementInSimulator.modify : Swift.Bool",
+      "GMFoundationWatch.AccelerometerService.generateMovementInSimulator.getter : Swift.Bool",
+      "direct field offset for GMFoundationWatch.AccelerometerService.generateMovementInSimulator : Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.AccelerometerService.generateMovementInSimulator : Swift.Bool",
+      "GMFoundationWatch.AccelerometerService.generateMovementInSimulator.setter : Swift.Bool",
+      "GMFoundationWatch.AccelerometerService.stop() -> ()",
+      "GMFoundationWatch.AccelerometerService.start(updateFrequency: Swift.Double) -> ()",
+      "GMFoundationWatch.AccelerometerService.restart() -> ()",
+      "GMFoundationWatch.AccelerometerService.__allocating_init() -> GMFoundationWatch.AccelerometerService",
+      "GMFoundationWatch.AccelerometerService.init() -> GMFoundationWatch.AccelerometerService",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(lastTickWhenMovementStarted in _8202E4E7E08F5497729072A5494BC77E) : Swift.Double?",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(secondsOfNonMovementNeededForNewMovement in _8202E4E7E08F5497729072A5494BC77E) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(historyIndex in _8202E4E7E08F5497729072A5494BC77E) : Swift.Int",
+      "GMFoundationWatch.FastMovementAnalyzer.__allocating_init(initialDLimit: Swift.Double) -> GMFoundationWatch.FastMovementAnalyzer",
+      "GMFoundationWatch.FastMovementAnalyzer.init(initialDLimit: Swift.Double) -> GMFoundationWatch.FastMovementAnalyzer",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(oldAcceleratorPoint in _8202E4E7E08F5497729072A5494BC77E) : GMFoundationWatch.Vector3d?",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(maxRollingAverageDiff in _8202E4E7E08F5497729072A5494BC77E) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(previousRollingAverage in _8202E4E7E08F5497729072A5494BC77E) : GMFoundationWatch.Vector3d?",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(oldAcceleratorPointLongTerm in _8202E4E7E08F5497729072A5494BC77E) : GMFoundationWatch.Vector3d?",
+      "GMFoundationWatch.FastMovementAnalyzer.dLimit.getter : Swift.Double",
+      "direct field offset for GMFoundationWatch.FastMovementAnalyzer.dLimit : Swift.Double",
+      "GMFoundationWatch.FastMovementAnalyzer.update(movement: GMFoundationWatch.Movement2) -> GMFoundationWatch.DecoratedMovement",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(counter in _8202E4E7E08F5497729072A5494BC77E) : Swift.Int",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(historyX in _8202E4E7E08F5497729072A5494BC77E) : [Swift.Double]",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(historyY in _8202E4E7E08F5497729072A5494BC77E) : [Swift.Double]",
+      "variable initialization expression of GMFoundationWatch.FastMovementAnalyzer.(historyZ in _8202E4E7E08F5497729072A5494BC77E) : [Swift.Double]",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(timeUnitWithMovementCount in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Int",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(movementEventCount in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Int",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(lastMovement in _DCAE632AEC067730BA43645AFB1802F6) : Swift.SIMD3<Swift.Double>",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(movementCount in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Int",
+      "GMFoundationWatch.MovementCountDetector.movementCountInterval.modify : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.movementCountInterval.getter : Swift.Double",
+      "direct field offset for GMFoundationWatch.MovementCountDetector.movementCountInterval : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.movementCountInterval : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.movementCountInterval.setter : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(calibRunIndex in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Int",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(inCalibration in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(movementTUCount in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Int",
+      "GMFoundationWatch.MovementCountDetector.collectTopEvents(from: Foundation.Date, to: Foundation.Date, count: Swift.Int) -> Swift.String",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(lastTimeUnitDate in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.markStartOfSession(at: Foundation.Date) -> ()",
+      "GMFoundationWatch.MovementCountDetector.calibratedThreshold.modify : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.calibratedThreshold.getter : Swift.Double",
+      "direct field offset for GMFoundationWatch.MovementCountDetector.calibratedThreshold : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.calibratedThreshold : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.calibratedThreshold.setter : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.startSimpleCalibration() -> ()",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(calibrationAnnealingFactor in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(pim in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(maxBM in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(active in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Bool",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(maxSum in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Double",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(calibsX in _DCAE632AEC067730BA43645AFB1802F6) : [Swift.Double]",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(calibAvg in _DCAE632AEC067730BA43645AFB1802F6) : Swift.SIMD3<Swift.Double>",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(calibMax in _DCAE632AEC067730BA43645AFB1802F6) : Swift.SIMD3<Swift.Double>",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(calibMin in _DCAE632AEC067730BA43645AFB1802F6) : Swift.SIMD3<Swift.Double>",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(goodRuns in _DCAE632AEC067730BA43645AFB1802F6) : [Swift.Double]",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(movement in _DCAE632AEC067730BA43645AFB1802F6) : Swift.SIMD3<Swift.Double>",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(nextDate in _DCAE632AEC067730BA43645AFB1802F6) : Swift.Double",
+      "GMFoundationWatch.MovementCountDetector.__allocating_init(threshold: Swift.Double) -> GMFoundationWatch.MovementCountDetector",
+      "GMFoundationWatch.MovementCountDetector.init(threshold: Swift.Double) -> GMFoundationWatch.MovementCountDetector",
+      "variable initialization expression of GMFoundationWatch.MovementCountDetector.(topEvents in _DCAE632AEC067730BA43645AFB1802F6) : [GMFoundationWatch.MovementCountDetector.(MovementCountEvent in _DCAE632AEC067730BA43645AFB1802F6)]"
+    ],
+    "selectedLocalizedStrings": {
+      "Alarm set between": "Alarm set between",
+      "Alarm set to": "Alarm set to",
+      "Calculating Sleep Score on your phone": "Calculating Sleep Score on your phone",
+      "Regular alarm": "Regular alarm",
+      "Smart alarm": "Smart alarm",
+      "Snooze": "Snooze",
+      "Stop": "Stop",
+      "Wake up window": "Wake up window",
+      "We need your permission to read motion data. We only use it to analyse your sleep.": "We need your permission to read motion data. We only use it to analyse your sleep. Change it under Settings > Privacy & Security > Motion & Fitness.",
+      "We recommend at least %i%% battery.\nYour current battery level is %i%%.\nContinue anyway?": "We recommend at least %li%% battery.\nYour current battery level is %li%%.\nContinue anyway?"
+    },
+    "coreMLModelResources": []
+  },
+  "phone": {
+    "entitlements": {
+      "application-identifier": "HDPHG57L8V.com.lexwarelabs.goodmorning",
+      "aps-environment": "production",
+      "com.apple.developer.applesignin": [
+        "Default"
+      ],
+      "com.apple.developer.associated-domains": [
+        "applinks:link.sleepcycle.com",
+        "applinks:sleepcycleapp.page.link",
+        "applinks:2wc2.adj.st",
+        "applinks:join.sleepcycle.com",
+        "webcredentials:sleepcycle.com"
+      ],
+      "com.apple.developer.healthkit": true,
+      "com.apple.developer.healthkit.access": [],
+      "com.apple.developer.healthkit.background-delivery": true,
+      "com.apple.developer.homekit": true,
+      "com.apple.developer.networking.wifi-info": true,
+      "com.apple.developer.siri": true,
+      "com.apple.developer.team-identifier": "HDPHG57L8V",
+      "com.apple.developer.usernotifications.time-sensitive": true,
+      "com.apple.security.application-groups": [
+        "group.com.lexwarelabs.goodmorning"
+      ]
+    },
+    "inspectedEncryptionCommands": {
+      "GoodMorning": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 1982464,
+          "cryptid": 1
+        }
+      ],
+      "GMData": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 1540096,
+          "cryptid": 1
+        }
+      ],
+      "GMServices": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 2654208,
+          "cryptid": 1
+        }
+      ],
+      "GMFoundation": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 2375680,
+          "cryptid": 1
+        }
+      ],
+      "GMApp": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 16973824,
+          "cryptid": 1
+        }
+      ],
+      "SleepCycleSDK": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 1359872,
+          "cryptid": 1
+        }
+      ],
+      "SleepCycleObjC": [
+        {
+          "command": "LC_ENCRYPTION_INFO_64",
+          "cryptoff": 16384,
+          "cryptsize": 16384,
+          "cryptid": 1
+        }
+      ]
+    },
+    "coreMLModelMetadata": [
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMApp.framework/auroracle_prod.mlmodelc/metadata.json",
+        "description": "Auroracle",
+        "inputs": [
+          {
+            "shortDescription": "",
+            "shape": "[1, 1, 864, 64]",
+            "name": "melspectogram"
+          }
+        ],
+        "outputs": [
+          {
+            "shortDescription": "",
+            "shape": "[1, 108, 30]",
+            "name": "strong"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[1, 30]",
+            "name": "weak"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[1, 108, 256]",
+            "name": "embeddings"
+          }
+        ]
+      },
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMApp.framework/bpm_computer.mlmodelc/metadata.json",
+        "description": null,
+        "inputs": [
+          {
+            "shortDescription": "",
+            "shape": "[6, 108]",
+            "name": "history"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[108]",
+            "name": "inhale"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[108]",
+            "name": "exhale"
+          }
+        ],
+        "outputs": [
+          {
+            "shortDescription": "",
+            "shape": "[6, 108]",
+            "name": "new_history"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[]",
+            "name": "bpm"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[]",
+            "name": "max_cval"
+          }
+        ]
+      },
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMServices.framework/StreamingAuroracle.mlmodelc/metadata.json",
+        "description": "Auroracle streaming sound-event classifier (stateful LSTM, flexible time axis)",
+        "inputs": [
+          {
+            "shortDescription": "",
+            "shape": "[1, 1, 144, 64]",
+            "name": "melspectrogram"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[2, 1, 128]",
+            "name": "h_in"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[2, 1, 128]",
+            "name": "c_in"
+          }
+        ],
+        "outputs": [
+          {
+            "shortDescription": "",
+            "shape": "[]",
+            "name": "strong"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[2, 1, 128]",
+            "name": "h_out"
+          },
+          {
+            "shortDescription": "",
+            "shape": "[2, 1, 128]",
+            "name": "c_out"
+          }
+        ]
+      },
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMServices.framework/snoracle.mlmodelc/metadata.json",
+        "description": "Snoracle with reduced dims",
+        "inputs": [
+          {
+            "shortDescription": "",
+            "shape": "[1, 1, 86, 64]",
+            "name": "features"
+          }
+        ],
+        "outputs": [
+          {
+            "shortDescription": "",
+            "shape": "[16]",
+            "name": "snoracle_embeddings"
+          }
+        ]
+      },
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMServices.framework/SnoracleEmbeddingsConversion.mlmodelc/metadata.json",
+        "description": "SnoracleDimensionReduction from 0.1.0 embeddings to 0.1.1",
+        "inputs": [
+          {
+            "shortDescription": "",
+            "shape": "[1, 1, 128]",
+            "name": "snoracle_embeddings_128"
+          }
+        ],
+        "outputs": [
+          {
+            "shortDescription": "",
+            "shape": "[16]",
+            "name": "snoracle_embeddings"
+          }
+        ]
+      },
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMServices.framework/snoracleknn.mlmodelc/metadata.json",
+        "description": "Snoracle knn",
+        "inputs": [
+          {
+            "shortDescription": "Snoracle embedding",
+            "shape": "[16]",
+            "name": "snoracle_embeddings"
+          }
+        ],
+        "outputs": [
+          {
+            "name": "label",
+            "shortDescription": "Predicted label"
+          },
+          {
+            "name": "labelProbability",
+            "shortDescription": "Probabilities for each possible label"
+          }
+        ]
+      },
+      {
+        "path": "Payload/GoodMorning.app/Frameworks/GMData.framework/Hypnoracle_primary.mlmodelc/metadata.json",
+        "description": "Sleep Staging Model (18ecf37b22994d69b40a36b84fb69455). Breathing and movements are normalized!",
+        "inputs": [
+          {
+            "shape": "[1, 1, 3]",
+            "name": "input",
+            "shortDescription": "BPM, CMAX, Movements"
+          }
+        ],
+        "outputs": [
+          {
+            "shortDescription": "Sleep Stages: Wake, REM, Light, Deep",
+            "shape": "[]",
+            "name": "stages"
+          }
+        ]
+      }
+    ]
+  },
+  "baselineDiagnostic": {
+    "purpose": "Reproduce incompatible raw-gravity baseline versus live userAcceleration in the unchanged heuristic. Illustrative second baseline is not a validated transform.",
+    "inputs": {
+      "liveUserAccelerationMagnitude": 0.02,
+      "liveSamples": 900,
+      "samplingHz": 10,
+      "rawRecorderBaseline": 1.0,
+      "illustrativeComparableBaseline": 0.005,
+      "heartRateSamples": 0
+    },
+    "results": {
+      "currentRawBaseline": {
+        "stillnessBreakScore": 0.0,
+        "motionConfidence": 0.13597445100693567
+      },
+      "illustrativeComparableBaseline": {
+        "stillnessBreakScore": 1.0,
+        "motionConfidence": 0.38597445100693567
+      },
+      "assertionsPassed": true
+    },
+    "sourceHashes": {
+      "Lights Timer Watch App/Services/WakeHeuristicEngine.swift": "350606c24ad0d9c37beeeeeb1a121a14cbfeb252acd6c84f80f26ad323c1e376",
+      "Lights Timer Watch App/Services/SmartWakeSessionController.swift": "5aca4f6381ef2a3b008d8ef3c1310fb71a5a91500ef0342e7dff23a16a060d2f",
+      "Lights Timer Watch App/Models/SmartWakeMessage.swift": "83a0d9173fcc922b0fd0aa5cae20a355e89080080d57f6f1ba236121d9ba6d12",
+      "Lights Timer Watch App/Models/WatchScheduleSnapshot.swift": "f749fd506810f5b0bc7ac16ec2efe7e4905e024faf0b67aedddcc418fc0a1b3c",
+      "plans/sleep-cycle-watch/BaselineProbe.swift": "b86eee2f1e0716c99d9c6685d56a42efaf7ade42ce44a3323dfd6aba4588fea8"
+    }
+  },
+  "sdkFollowUp": {
+    "version": "1.5.2",
+    "officialDocumentation": "https://sdk.sleepcycle.com/en/ios/",
+    "packageRepository": "https://github.com/MDLabs/sleepcycle-sdk-swift",
+    "releaseZIP": "https://github.com/MDLabs/sleepcycle-sdk-swift/releases/download/v1.5.2/SleepCycleSDK-1.5.2.zip",
+    "zipSHA256": "484f8167b367c5dd54812fab74b2b6738b02617a7c2309591b627f17c407758b",
+    "matchingBuildEvidence": {
+      "publicSDK": {
+        "bytes": 1709752,
+        "sha256": "81779e6e6be6b5b1752875e63bd4ac158db0463f2be51bf67bddd7a1ab7b0379",
+        "uuid": "860C589C-9591-314C-A7B6-31AF8CAE0BE9",
+        "encryption": {
+          "cryptoff": 16384,
+          "cryptsize": 1359872,
+          "cryptid": 0
+        },
+        "textSections": [
+          {
+            "name": "__text",
+            "address": 16384,
+            "bytes": 1136292,
+            "offset": 16384,
+            "sha256": "6e4d792527a6ca51f9ebeb55718fc9661672a7a63a2ae9c3e2497a572c17ceba"
+          },
+          {
+            "name": "__stubs",
+            "address": 1152676,
+            "bytes": 7104,
+            "offset": 1152676,
+            "sha256": "3b06d9aa0e6dd107bb7d24b2781a3d552a8fac4496936b197f7de0289e5d7db3"
+          },
+          {
+            "name": "__stub_helper",
+            "address": 1159780,
+            "bytes": 7104,
+            "offset": 1159780,
+            "sha256": "6683ea55d65a364d26060f4798d92a917dd8bff18995f23048b6be5ace5b8868"
+          },
+          {
+            "name": "__objc_stubs",
+            "address": 1166912,
+            "bytes": 4800,
+            "offset": 1166912,
+            "sha256": "38c44e4b3fcfe62cbaf891c5bcba3a5657c5bd2b99c071ce267e0117c051950a"
+          },
+          {
+            "name": "__const",
+            "address": 1171712,
+            "bytes": 32132,
+            "offset": 1171712,
+            "sha256": "b7804ad1b4c523ac94e5c6976c00bb3f9ed2168747b66d5aa0088887795c0763"
+          },
+          {
+            "name": "__objc_classname",
+            "address": 1203856,
+            "bytes": 3523,
+            "offset": 1203856,
+            "sha256": "02d1d36f2a88ba7b0bff836a69ccc52f0009737161be84a986affa60c8545308"
+          },
+          {
+            "name": "__objc_methname",
+            "address": 1207392,
+            "bytes": 11753,
+            "offset": 1207392,
+            "sha256": "6dcee854bf15ed5e73b04c8d1326c7f48d7d359022131a90f26e6379db3145c7"
+          },
+          {
+            "name": "__objc_methtype",
+            "address": 1219152,
+            "bytes": 2034,
+            "offset": 1219152,
+            "sha256": "1ba0a2b3ad822a6799180ce89653bb824c49dfa342ad42862baab7d7ad1c01c8"
+          },
+          {
+            "name": "__constg_swiftt",
+            "address": 1221188,
+            "bytes": 17024,
+            "offset": 1221188,
+            "sha256": "c51746687aa55ad8c61f54c4cc1e60f1af95f7ca01dc14cf59f6769fd57aeeb5"
+          },
+          {
+            "name": "__cstring",
+            "address": 1238224,
+            "bytes": 31094,
+            "offset": 1238224,
+            "sha256": "8bd64ff99dd351460a94d5abb3dec13b1a568cb563a97e0fa426c3222df50f3e"
+          },
+          {
+            "name": "__swift5_typeref",
+            "address": 1269318,
+            "bytes": 10585,
+            "offset": 1269318,
+            "sha256": "f07d0d956b2d6029147f5308a1971cf30563987f3deb587b3a5e8b5bc98b7557"
+          },
+          {
+            "name": "__swift5_reflstr",
+            "address": 1279904,
+            "bytes": 15366,
+            "offset": 1279904,
+            "sha256": "89747be726de048684621c629f481af5188b32b1b5b2aa47b3e5c4fb49996869"
+          },
+          {
+            "name": "__swift5_fieldmd",
+            "address": 1295272,
+            "bytes": 17660,
+            "offset": 1295272,
+            "sha256": "be9df8e22fb033354328f3e8dc6f3e20e85fb7fa09adfe92194668d54325e517"
+          },
+          {
+            "name": "__swift5_builtin",
+            "address": 1312932,
+            "bytes": 240,
+            "offset": 1312932,
+            "sha256": "faaa99239595fef2ab83229f9c3236fa52b1053e30679d858860a751c3067b40"
+          },
+          {
+            "name": "__swift5_assocty",
+            "address": 1313172,
+            "bytes": 696,
+            "offset": 1313172,
+            "sha256": "223f5d77d8b8dfea287de13ab0da008f9931b270697d17cb2a56499289833ebb"
+          },
+          {
+            "name": "__swift5_proto",
+            "address": 1313868,
+            "bytes": 1164,
+            "offset": 1313868,
+            "sha256": "6384864d7fa9a11057622acc8bcf63dbe005f2876426d25c23299ed5a67aedb4"
+          },
+          {
+            "name": "__swift5_types",
+            "address": 1315032,
+            "bytes": 944,
+            "offset": 1315032,
+            "sha256": "ca8989902c4920fae58d2d14d98ba643cc2def5c9aa97de0d7809bfaea14467f"
+          },
+          {
+            "name": "__swift5_capture",
+            "address": 1315976,
+            "bytes": 2300,
+            "offset": 1315976,
+            "sha256": "768ad61838a651ebc4058a701f6a26c828c8be5f0ad31f3880e310ab758167f8"
+          },
+          {
+            "name": "__swift5_protos",
+            "address": 1318276,
+            "bytes": 64,
+            "offset": 1318276,
+            "sha256": "c770fc9e637669df4b0af8f3f588a1f60b37353c80b4575e774f1561d2ac89b4"
+          },
+          {
+            "name": "__swift_as_entry",
+            "address": 1318340,
+            "bytes": 540,
+            "offset": 1318340,
+            "sha256": "b7cb683ad5b4f9301dc487f27bb1afc2e79974d0127705165319c689c3bebb84"
+          },
+          {
+            "name": "__swift_as_ret",
+            "address": 1318880,
+            "bytes": 628,
+            "offset": 1318880,
+            "sha256": "bfeef80693d0b045cfbddd10a00a2537c906c9c6977656199c52e8409800e150"
+          },
+          {
+            "name": "__swift5_mpenum",
+            "address": 1319508,
+            "bytes": 16,
+            "offset": 1319508,
+            "sha256": "5d71034855592f4454b014235fba8903b5ec2e8100f4e7d279d11a24bd3f5a54"
+          },
+          {
+            "name": "__unwind_info",
+            "address": 1319524,
+            "bytes": 15480,
+            "offset": 1319524,
+            "sha256": "f73749846fe523517793808b513b9fc264f078ed591524dcebab153ad0e8fed1"
+          },
+          {
+            "name": "__eh_frame",
+            "address": 1335008,
+            "bytes": 36936,
+            "offset": 1335008,
+            "sha256": "93292fd518e0c866afc5c4da07ce4b54d3c2865407c17e231850ae3cf6427a6a"
+          }
+        ]
+      },
+      "ipaSDK": {
+        "bytes": 1771824,
+        "sha256": "bd1ccea86d340bfff975ba985cba171a77f95a146f3fe53e101e4b281994d0e5",
+        "uuid": "860C589C-9591-314C-A7B6-31AF8CAE0BE9",
+        "encryption": {
+          "cryptoff": 16384,
+          "cryptsize": 1359872,
+          "cryptid": 1
+        },
+        "textSections": [
+          {
+            "name": "__text",
+            "address": 16384,
+            "bytes": 1136292,
+            "offset": 16384,
+            "sha256": "e27e725e5ced26357adf92942d0a4cade012621213a0d453644bc54f2477b197"
+          },
+          {
+            "name": "__stubs",
+            "address": 1152676,
+            "bytes": 7104,
+            "offset": 1152676,
+            "sha256": "267cba93c1114d81d909afc2c1b5a912595ba760aabf298fb4c9b8d84fc164ee"
+          },
+          {
+            "name": "__stub_helper",
+            "address": 1159780,
+            "bytes": 7104,
+            "offset": 1159780,
+            "sha256": "68cee1906d23f149be65e07be19d118fe35c377ae8d22997fce5fb9b67681cc6"
+          },
+          {
+            "name": "__objc_stubs",
+            "address": 1166912,
+            "bytes": 4800,
+            "offset": 1166912,
+            "sha256": "7e60551f6ccff668c3f41370352de6cd0c4e5f93d8d2fe29eec42c6df07726cc"
+          },
+          {
+            "name": "__const",
+            "address": 1171712,
+            "bytes": 32132,
+            "offset": 1171712,
+            "sha256": "92055285dcfeac2ff2440e087e55090fc35a15155fa44d5c02e193936ba59a4a"
+          },
+          {
+            "name": "__objc_classname",
+            "address": 1203856,
+            "bytes": 3523,
+            "offset": 1203856,
+            "sha256": "5104a824c44d363a4ab58fe1fc957833025bd3942b0f61fc53a6373800bd34da"
+          },
+          {
+            "name": "__objc_methname",
+            "address": 1207392,
+            "bytes": 11753,
+            "offset": 1207392,
+            "sha256": "a40cce1358a9d91e18b09184cc1c274d45ac3f63841001872b427d5388f52d6a"
+          },
+          {
+            "name": "__objc_methtype",
+            "address": 1219152,
+            "bytes": 2034,
+            "offset": 1219152,
+            "sha256": "933294a0127911825d37a598e99938178837b1da5397e5ce36b64f1716df2825"
+          },
+          {
+            "name": "__constg_swiftt",
+            "address": 1221188,
+            "bytes": 17024,
+            "offset": 1221188,
+            "sha256": "efa55495f8da1320a4a14e855495ae1518214c2943f4209a3bfe4638e54e0cca"
+          },
+          {
+            "name": "__cstring",
+            "address": 1238224,
+            "bytes": 31094,
+            "offset": 1238224,
+            "sha256": "3742c9309a21a32a74e8598f71877b3d7359c5296888c1a01bcf32757923ad46"
+          },
+          {
+            "name": "__swift5_typeref",
+            "address": 1269318,
+            "bytes": 10585,
+            "offset": 1269318,
+            "sha256": "6e83f6d6b661ce80b822fbbb9b8533aaff36d50de4aaa8d201fa2b68f3893f1c"
+          },
+          {
+            "name": "__swift5_reflstr",
+            "address": 1279904,
+            "bytes": 15366,
+            "offset": 1279904,
+            "sha256": "6ab6e12a2cdf7e2b7968d4fefaedef8ad3373fdc4460240e45809d01b28ad917"
+          },
+          {
+            "name": "__swift5_fieldmd",
+            "address": 1295272,
+            "bytes": 17660,
+            "offset": 1295272,
+            "sha256": "aefa58b759eef171c57e4b2bca758f1a7584870383577e23d11f2cc46423d6b7"
+          },
+          {
+            "name": "__swift5_builtin",
+            "address": 1312932,
+            "bytes": 240,
+            "offset": 1312932,
+            "sha256": "ea407c5a09c22117e9ea18efc66920ff02161528c3b7990414bf2f1c65f4e234"
+          },
+          {
+            "name": "__swift5_assocty",
+            "address": 1313172,
+            "bytes": 696,
+            "offset": 1313172,
+            "sha256": "b29dda825e4c9add4db78f5650a89ead5e673d3f2835aeceeb428232bdece388"
+          },
+          {
+            "name": "__swift5_proto",
+            "address": 1313868,
+            "bytes": 1164,
+            "offset": 1313868,
+            "sha256": "87771d5e1aa8adab0861c790dbc6d263352219ef36adc829a2a170333cc390aa"
+          },
+          {
+            "name": "__swift5_types",
+            "address": 1315032,
+            "bytes": 944,
+            "offset": 1315032,
+            "sha256": "b9fef8b39102c0a759e06d3fb9d84be7988b2cdab346eeccde6d2d94a8861d86"
+          },
+          {
+            "name": "__swift5_capture",
+            "address": 1315976,
+            "bytes": 2300,
+            "offset": 1315976,
+            "sha256": "119ab5b660c466f3ca452822a6fc43661ec2fb4d666158fa63fcc353ca09a121"
+          },
+          {
+            "name": "__swift5_protos",
+            "address": 1318276,
+            "bytes": 64,
+            "offset": 1318276,
+            "sha256": "be18b152f070d4eb074843e06ab4bcd40eb88650d545c78320e9ffbc74c475a7"
+          },
+          {
+            "name": "__swift_as_entry",
+            "address": 1318340,
+            "bytes": 540,
+            "offset": 1318340,
+            "sha256": "be8a1b810fb271bbbc8916328a6a495f79d3f229febcf7a6b04efbcba5405c81"
+          },
+          {
+            "name": "__swift_as_ret",
+            "address": 1318880,
+            "bytes": 628,
+            "offset": 1318880,
+            "sha256": "0cf876297cec07ef6ed32e750767d646ab4e1b003d3e09fcb11c7193aff1a93d"
+          },
+          {
+            "name": "__swift5_mpenum",
+            "address": 1319508,
+            "bytes": 16,
+            "offset": 1319508,
+            "sha256": "2784a686a27385619a5c1629bd65547e1637cffd3870fbee1b866c1795ce82ab"
+          },
+          {
+            "name": "__unwind_info",
+            "address": 1319524,
+            "bytes": 15480,
+            "offset": 1319524,
+            "sha256": "774aafebc7d2ea36a0bbc9f2354dcf12dd2f98806d197b03b461e94b0c5c2c7a"
+          },
+          {
+            "name": "__eh_frame",
+            "address": 1335008,
+            "bytes": 36936,
+            "offset": 1335008,
+            "sha256": "8fe3ec7256b3afdfafcb668e581f2c51ece4dab0ea98157d435ca6348c85d662"
+          }
+        ]
+      },
+      "sectionLayoutMatches": true,
+      "sharedExternalSymbols": 838,
+      "sameAddressAndSection": 838,
+      "matchingPlaintextSections": []
+    },
+    "functionStarts": {
+      "bytes": 6144,
+      "bothSHA256": "f02afc84f363e034fc6532c1b254cae025a550f1c7d516a061d7a57c6aa66153"
+    },
+    "watchApplicability": "Not established. Watch imports/exports identify separate GMFoundationWatch.FastMovementAnalyzer; it does not link SleepCycleSDK.",
+    "localIgnoredCache": ".research-cache/sleep-cycle-sdk-1.5.2/",
+    "decompiler": "Ghidra 12.2; native decompiler built locally for arm64. Generated C is an approximation; numerical/vector instructions were cross-checked using Capstone.",
+    "emulation": {
+      "binarySHA256": "81779e6e6be6b5b1752875e63bd4ac158db0463f2be51bf67bddd7a1ab7b0379",
+      "scope": "Pure SDK arithmetic executed in an ARM64 emulator; no watch code executed.",
+      "interpolation": {
+        "address": "0xF3CB4",
+        "casesPassed": 103
+      },
+      "largeMovementThreshold": {
+        "address": "0xFE818",
+        "cases": [
+          {
+            "windowFraction": 0.0,
+            "instructionResult": 20.0
+          },
+          {
+            "windowFraction": 0.3,
+            "instructionResult": 20.0
+          },
+          {
+            "windowFraction": 0.475,
+            "instructionResult": 18.125
+          },
+          {
+            "windowFraction": 0.65,
+            "instructionResult": 12.499999999999996
+          },
+          {
+            "windowFraction": 0.825,
+            "instructionResult": 6.875000000000002
+          },
+          {
+            "windowFraction": 1.0,
+            "instructionResult": 5.0
+          },
+          {
+            "windowFraction": 1.2,
+            "instructionResult": 5.0
+          }
+        ],
+        "missingRangeResult": 10.0
+      },
+      "percentile": {
+        "address": "0xFE95C",
+        "cases": [
+          {
+            "fraction": 0.0,
+            "instructionResult": 1.0
+          },
+          {
+            "fraction": 0.5,
+            "instructionResult": 6.0
+          },
+          {
+            "fraction": 0.7,
+            "instructionResult": 8.0
+          },
+          {
+            "fraction": 0.9,
+            "instructionResult": 10.0
+          },
+          {
+            "fraction": 1.0,
+            "instructionResult": 10.0
+          }
+        ]
+      },
+      "biquadCoefficients_b0_b1_b2_a1_a2": [
+        [
+          0.3654502711939662,
+          0.7309005423879325,
+          0.3654502711939662,
+          0.342548469256106,
+          0.20680325470874872
+        ],
+        [
+          1.0,
+          -2.0,
+          1.0,
+          -1.889056624844439,
+          0.8952299639500302
+        ]
+      ],
+      "constructorConstants": {
+        "internalSamplingHz": 40.0,
+        "gridStepSeconds": 0.025,
+        "thresholdMultiplier": 6.0,
+        "holdMultiplier": 1.5,
+        "minimumEventSeconds": 0.6,
+        "envelopeSeconds": 0.15,
+        "noiseWindowSeconds": 120.0,
+        "noiseSamplingHz": 10.0,
+        "noiseUpdateSeconds": 0.5,
+        "warmupSeconds": 10.0,
+        "gapResetSeconds": 1.0,
+        "maximumGapWithinEventSeconds": 1.0,
+        "maximumEventSeconds": 30.0,
+        "minimumIntervalBetweenEventsSeconds": 0.0
+      }
+    },
+    "addresses": {
+      "accelerationInput": "0x4000",
+      "sampleProcessing": "0x4A68",
+      "biquad": "0x73AC",
+      "noiseMedianMAD": "0x7598",
+      "eventFinalization": "0x77CC",
+      "motionPipelineConstruction": "0x8D168",
+      "movementConsumption": "0xF8E54",
+      "advanceTime": "0xFB5B4",
+      "fireOnce": "0xFC180",
+      "movementDecision": "0xFC6E8",
+      "normalTriggerConfiguration": "0xFCAFC",
+      "calibration": "0xFEA74",
+      "interpolation": "0xF3CB4",
+      "largeMovementThreshold": "0xFE818",
+      "percentile": "0xFE95C"
+    },
+    "runtimeValidationLimit": "Only three pure arithmetic helpers were emulated. Whole SDK session behavior, sleep accuracy, and exact watch implementation were not validated."
+  },
+  "deviceAccessFollowUp": {
+    "installedAppVersion": "6.26.430",
+    "installedAppBuild": "28530",
+    "builtByDeveloper": false,
+    "containerAccessible": false,
+    "phoneDeveloperMode": "enabled",
+    "watchDeveloperMode": "disabled",
+    "unlockedLLDBResult": "Not allowed to attach to process.",
+    "fridaVersion": "17.26.2",
+    "fridaAccess": "jailed",
+    "fridaAttachError": "InvalidArgumentError: unable to attach to the specified process",
+    "memoryDumpObtained": false,
+    "deviceIdentifiersOmitted": true
+  },
+  "simulatorFollowUp": {
+    "date": "2026-11-07",
+    "runtime": "watchOS 26.2 (23S303), arm64",
+    "installed": true,
+    "originalLaunchSucceeded": false,
+    "retaggedSignedEncryptedSpawnExit": 153,
+    "watchSimulatorControlMemoryReadSucceeded": true,
+    "ciphertextCopyMemoryReadSucceeded": true,
+    "protectedRegion": {
+      "fileOffset": 16384,
+      "length": 2211840,
+      "cryptidOriginal": 1,
+      "cryptidNegativeControl": 0,
+      "diskSHA256": "2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c",
+      "memorySHA256": "2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c"
+    },
+    "ciphertextExecutionSignal": "SIGBUS (10)",
+    "decryptedWatchCodeRecovered": false,
+    "evidenceFile": "simulator-proof.json",
+    "simulatorCleanup": "Retained and shut down"
+  },
+  "currentResult": {
+    "watchDecryption": "success: both architecture slices",
+    "decryptedWatchSHA256": "3e657e7c1e619a3bae7d13f3627b0fe0b4d204d4c45ef4f16aef673051c33e5d",
+    "watchAlgorithm": "raw-XYZ movement detection plus overnight event-bin-rate calibration and timed wake rules",
+    "verificationFiles": [
+      "decryption-proof.json",
+      "watch-proof.json",
+      "watch-arm64_32-parity.json"
+    ],
+    "specifications": [
+      "MOTION.md",
+      "ALARM.md",
+      "RUNTIME.md"
+    ],
+    "reference": "WatchAlgorithmReference.py",
+    "helperUninstalled": true,
+    "productionSwiftChanged": false,
+    "limits": [
+      "Machine-code behavioral reconstruction; original source not recovered.",
+      "ARM64 instruction emulation supplies platform/runtime shims.",
+      "ARM64_32 parity is static inspection, not instruction emulation.",
+      "No completed overnight accuracy or power trial."
+    ]
+  }
+}

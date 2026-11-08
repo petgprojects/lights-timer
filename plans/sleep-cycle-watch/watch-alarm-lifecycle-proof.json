@@ -1,0 +1,1124 @@
+{
+  "scope": "Execute watch alarm entry guards, runtime-expiration predicate and dispatcher.\n\nRuns original 0x99334 including 0x36e74, and original dispatcher 0x9af74 with\noriginal movement filter and alarm decision. Phase-change callback supplies the\nseparately tested calibration result; it is not part of this probe's coverage.\nFoundation/Combine/Notification/Swift runtime accesses are synthetic fixtures.\n",
+  "binarySHA256": "0a9e3b7fed96bb498630dc9abbb4c24bb8830e1268fba5d7daf439fb99e68dc2",
+  "casesPassed": 56,
+  "cases": [
+    {
+      "name": "deadline_-1e-06",
+      "input": {
+        "now": 1299.999999
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "deadline_0.0",
+      "input": {
+        "now": 1300.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "deadline_1e-06",
+      "input": {
+        "now": 1300.000001
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "expiration_-1.0",
+      "input": {
+        "expiry": 999.0
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "expiration_0.0",
+      "input": {
+        "expiry": 1000.0
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "expiration_299.999999",
+      "input": {
+        "expiry": 1299.9999990000001
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "expiration_300.0",
+      "input": {
+        "expiry": 1300.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "expiration_300.000001",
+      "input": {
+        "expiry": 1300.0000009999999
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "expiration_1000.0",
+      "input": {
+        "expiry": 2000.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": false,
+        "deadline": null,
+        "has_delegate": false,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": false,
+        "deadline": null,
+        "has_delegate": true,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": false,
+        "deadline": 900.0,
+        "has_delegate": false,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": false,
+        "deadline": 900.0,
+        "has_delegate": true,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": true,
+        "deadline": null,
+        "has_delegate": false,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": true,
+        "deadline": null,
+        "has_delegate": true,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": true,
+        "deadline": 900.0,
+        "has_delegate": false,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_alarm_or_deadline",
+      "input": {
+        "has_alarm": true,
+        "deadline": 900.0,
+        "has_delegate": true,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "missing_runtime",
+      "input": {
+        "has_delegate": false,
+        "has_runtime": false,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_runtime",
+      "input": {
+        "has_delegate": false,
+        "has_runtime": true,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "missing_runtime",
+      "input": {
+        "has_delegate": true,
+        "has_runtime": false,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "missing_runtime",
+      "input": {
+        "has_delegate": true,
+        "has_runtime": true,
+        "expiry": 1001.0
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 0,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_0_delta_-1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 0,
+        "now": 699.999999,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 0,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_0_delta_-1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 0,
+        "now": 699.999999,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 0,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_0_delta_0.0_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 0,
+        "now": 700.0,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 0,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_0_delta_0.0_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 0,
+        "now": 700.0,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 0,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_0_delta_1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 0,
+        "now": 700.000001,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 0,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_0_delta_1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 0,
+        "now": 700.000001,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 0,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_1_delta_-1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 699.999999,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_1_delta_-1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 699.999999,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_1_delta_0.0_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 700.0,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_1_delta_0.0_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 700.0,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_1_delta_1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 700.000001,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_1_delta_1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 700.000001,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_2_delta_-1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 2,
+        "now": 699.999999,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_2_delta_-1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 2,
+        "now": 699.999999,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_2_delta_0.0_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 2,
+        "now": 700.0,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_2_delta_0.0_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 2,
+        "now": 700.0,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_2_delta_1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 2,
+        "now": 700.000001,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_2_delta_1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 2,
+        "now": 700.000001,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_3_delta_-1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 3,
+        "now": 699.999999,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 3,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_3_delta_-1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 3,
+        "now": 699.999999,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 3,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_3_delta_0.0_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 3,
+        "now": 700.0,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 3,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_3_delta_0.0_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 3,
+        "now": 700.0,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 3,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_3_delta_1e-06_fired_False",
+      "input": {
+        "dispatch": true,
+        "phase": 3,
+        "now": 700.000001,
+        "fired": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_3_delta_1e-06_fired_True",
+      "input": {
+        "dispatch": true,
+        "phase": 3,
+        "now": 700.000001,
+        "fired": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "phase_dates",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "prearmed": null,
+        "armed": 700.0,
+        "now": 700.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_dates",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "prearmed": 700.0,
+        "armed": null,
+        "now": 700.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_dates",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "prearmed": 699.0,
+        "armed": 701.0,
+        "now": 700.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 3,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          3
+        ],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "phase_dates",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "prearmed": 701.0,
+        "armed": 699.0,
+        "now": 700.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 1,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "notification_missing_or_wrong_type",
+      "input": {
+        "dispatch": true,
+        "has_notification": false,
+        "cast_valid": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "notification_missing_or_wrong_type",
+      "input": {
+        "dispatch": true,
+        "has_notification": true,
+        "cast_valid": false
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [],
+        "decisionCalls": 0,
+        "filterCalls": 0,
+        "runtimeCalls": 0
+      }
+    },
+    {
+      "name": "dispatcher_deadline",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 1299.999999
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "dispatcher_deadline",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 1300.0
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "dispatcher_deadline",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "now": 1300.000001
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": -1.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "dispatcher_sensitive",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "active": false,
+        "intensity": 0.5,
+        "sensitive": true
+      },
+      "result": {
+        "fire": false,
+        "last": null,
+        "phase": 2,
+        "fired": false,
+        "lastTick": -1.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    },
+    {
+      "name": "dispatcher_sensitive",
+      "input": {
+        "dispatch": true,
+        "phase": 1,
+        "active": true,
+        "intensity": 0.5,
+        "sensitive": true
+      },
+      "result": {
+        "fire": true,
+        "last": null,
+        "phase": 2,
+        "fired": true,
+        "lastTick": 1000.0,
+        "transitions": [
+          3,
+          2
+        ],
+        "decisionCalls": 1,
+        "filterCalls": 1,
+        "runtimeCalls": 1
+      }
+    }
+  ]
+}

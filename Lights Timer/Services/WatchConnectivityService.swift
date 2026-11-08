@@ -43,17 +43,13 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
 
     // MARK: - Send to Watch
 
-    func sendSchedules(
-        _ snapshots: [WatchScheduleSnapshot],
-        powerMode: SmartWakePowerMode,
-        calibrationProfile: SmartWakeCalibrationProfile
-    ) {
+    func sendSchedules(_ snapshots: [WatchScheduleSnapshot]) {
         do {
             let data = try JSONEncoder().encode(
                 SmartWakeSyncPayload(
                     schedules: snapshots,
-                    powerMode: powerMode,
-                    calibrationProfile: calibrationProfile
+                    powerMode: .balanced,
+                    calibrationProfile: .default
                 )
             )
             cachedSchedulesContext = [

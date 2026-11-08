@@ -83,7 +83,7 @@ final class WatchAppServices {
             reason = "Suspended during active monitoring"
         } else {
             shouldEnable = true
-            reason = "Background HR delivery active for motion-first Smart Wake"
+            reason = "Optional background HR telemetry active"
         }
 
         sessionController.configurePassiveHeartRateObservation(

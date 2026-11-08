@@ -20,8 +20,8 @@ struct LightsTimerWatchApp: App {
                 .environment(services.sessionController)
                 .environment(services.alarmScheduler)
                 .task {
-                    // Request HealthKit authorization
-                    _ = await services.sessionController.requestAuthorization()
+                    // Health access is optional telemetry, requested explicitly
+                    // from Diagnostics. Movement arming must not wait for it.
                     services.sessionManager.sendHeartRateStatus(
                         active: services.sessionController.hasConfirmedHRAccess
                     )

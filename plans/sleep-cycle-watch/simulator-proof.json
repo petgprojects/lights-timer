@@ -1,0 +1,250 @@
+{
+  "investigatedDate": "2026-11-07",
+  "runtime": "watchOS 26.2 (23S303), arm64",
+  "simulatorName": "Sleep Cycle Research",
+  "scope": "Isolated local simulator experiments; no production app changes and no decrypted watch code recovered.",
+  "originalWatchPlatforms": [
+    "WATCHOS"
+  ],
+  "originalWatchArchitectures": [
+    "arm64",
+    "arm64_32"
+  ],
+  "simulatorPlatform": "WATCHOSSIMULATOR",
+  "controlSource": "#include <stdio.h>\n#include <unistd.h>\n#include <stdint.h>\nvolatile uint64_t probe_marker = 0x5343574154434831ULL;\nint main(void) { printf(\"pid=%d marker=%p\\n\", getpid(), (void*)&probe_marker); fflush(stdout); sleep(120); return 0; }\n",
+  "results": {
+    "installOriginal": {
+      "command": [
+        "xcrun",
+        "simctl",
+        "install",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+        "/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatch.app"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "launchOriginal": {
+      "command": [
+        "xcrun",
+        "simctl",
+        "launch",
+        "--wait-for-debugger",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+        "com.lexwarelabs.goodmorning.watchkitapp"
+      ],
+      "exit": 1,
+      "stdout": "",
+      "stderr": "An error was encountered processing the command (domain=FBSOpenApplicationServiceErrorDomain, code=1):\nSimulator device failed to launch com.lexwarelabs.goodmorning.watchkitapp.\nThe request was denied by service delegate (IOSSHLMainWorkspace).\nUnderlying error (domain=FBSOpenApplicationServiceErrorDomain, code=1):\n\tThe request to open \"com.lexwarelabs.goodmorning.watchkitapp\" failed.\n\tThe request was denied by service delegate (IOSSHLMainWorkspace).\n"
+    },
+    "launchAfterPermissionFix": {
+      "command": [
+        "xcrun",
+        "simctl",
+        "launch",
+        "--wait-for-debugger",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+        "com.lexwarelabs.goodmorning.watchkitapp"
+      ],
+      "adjustment": "Restored execute permission on installed SCWatch stub; installer had set 0644. No binary bytes changed.",
+      "exit": 1,
+      "stdout": "",
+      "stderr": "An error was encountered processing the command (domain=FBSOpenApplicationServiceErrorDomain, code=1):\nSimulator device failed to launch com.lexwarelabs.goodmorning.watchkitapp.\nThe request was denied by service delegate (IOSSHLMainWorkspace).\nUnderlying error (domain=FBSOpenApplicationServiceErrorDomain, code=1):\n\tThe request to open \"com.lexwarelabs.goodmorning.watchkitapp\" failed.\n\tThe request was denied by service delegate (IOSSHLMainWorkspace).\n"
+    },
+    "spawnOriginalExtension": {
+      "command": [
+        "xcrun",
+        "simctl",
+        "spawn",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+        "/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatch.app/PlugIns/SCWatchExtension.appex/SCWatchExtension"
+      ],
+      "exit": 153,
+      "stdout": "",
+      "stderr": "An error was encountered processing the command (domain=com.apple.CoreSimulator.LaunchdSimError, code=153):\nProcess spawn via launchd failed.\nUnderlying error (domain=SimXPCErrorDomain, code=153):\n\tCompletely unexpected error\n"
+    },
+    "retargetAndSign": [
+      {
+        "command": [
+          "xcrun",
+          "lipo",
+          ".research-cache/sleep-cycle-simulator/SCWatch.app/PlugIns/SCWatchExtension.appex/SCWatchExtension",
+          "-thin",
+          "arm64",
+          "-output",
+          ".research-cache/sleep-cycle-simulator/SCWatchExtension-arm64"
+        ],
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      {
+        "command": [
+          "xcrun",
+          "vtool",
+          "-set-build-version",
+          "watchossim",
+          "26.0",
+          "27.0",
+          "-replace",
+          "-output",
+          ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim",
+          ".research-cache/sleep-cycle-simulator/SCWatchExtension-arm64"
+        ],
+        "exit": 0,
+        "stdout": "",
+        "stderr": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/vtool warning: code signature will be invalid for .research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim\n"
+      },
+      {
+        "command": [
+          "codesign",
+          "--force",
+          "--sign",
+          "-",
+          ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim"
+        ],
+        "exit": 0,
+        "stdout": "",
+        "stderr": ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim: replacing existing signature\n"
+      },
+      {
+        "command": [
+          "codesign",
+          "--verify",
+          "--verbose=2",
+          ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim"
+        ],
+        "exit": 0,
+        "stdout": "",
+        "stderr": ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim: valid on disk\n.research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim: satisfies its Designated Requirement\n"
+      },
+      {
+        "command": [
+          "xcrun",
+          "vtool",
+          "-show-build",
+          ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim"
+        ],
+        "exit": 0,
+        "stdout": ".research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim:\nLoad command 62\n      cmd LC_BUILD_VERSION\n  cmdsize 24\n platform WATCHOSSIMULATOR\n    minos 26.0\n      sdk 27.0\n   ntools 0\n",
+        "stderr": ""
+      },
+      {
+        "command": [
+          "xcrun",
+          "simctl",
+          "spawn",
+          "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+          "/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-arm64"
+        ],
+        "exit": 153,
+        "stdout": "",
+        "stderr": "An error was encountered processing the command (domain=com.apple.CoreSimulator.LaunchdSimError, code=153):\nProcess spawn via launchd failed.\nUnderlying error (domain=SimXPCErrorDomain, code=153):\n\tCompletely unexpected error\n"
+      },
+      {
+        "command": [
+          "xcrun",
+          "simctl",
+          "spawn",
+          "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+          "/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim"
+        ],
+        "exit": 153,
+        "stdout": "",
+        "stderr": "An error was encountered processing the command (domain=com.apple.CoreSimulator.LaunchdSimError, code=153):\nProcess spawn via launchd failed.\nUnderlying error (domain=SimXPCErrorDomain, code=153):\n\tCompletely unexpected error\n"
+      }
+    ],
+    "debuggerControl": {
+      "command": [
+        "xcrun",
+        "lldb",
+        "--batch",
+        "-p",
+        "35035",
+        "-o",
+        "memory read --format x --size 8 --count 1 0x100224000",
+        "-o",
+        "process kill"
+      ],
+      "exit": 0,
+      "stdout": "(lldb) process attach --pid 35035\nProcess 35035 stopped\n* thread #1, queue = 'com.apple.main-thread', stop reason = signal SIGSTOP\n       frame #0: 0x0000000100387e54 libsystem_kernel.dylib`__semwait_signal + 8\nlibsystem_kernel.dylib`__semwait_signal:\n->  0x100387e54 <+8>:  b.lo   0x100387e70               ; <+36>\n    0x100387e58 <+12>: stp    x29, x30, [sp, #-0x10]!\n    0x100387e5c <+16>: mov    x29, sp\n    0x100387e60 <+20>: bl     0x1003862d0               ; cerror\nTarget 0: (MemoryControl) stopped.\nExecutable binary set to \"/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/MemoryControl\".\nArchitecture set to: arm64-apple-watchos-simulator.\n(lldb) memory read --format x --size 8 --count 1 0x100224000\n0x100224000: 0x5343574154434831\n(lldb) process kill\nProcess 35035 exited with status = 9 (0x00000009) killed\n",
+      "stderr": ""
+    },
+    "ciphertextControlSetup": {
+      "note": "Negative control only. Encryption flag cleared without decrypting any bytes. Do not treat this file or its memory as recovered code.",
+      "command": [
+        "xcrun",
+        "simctl",
+        "spawn",
+        "--wait-for-debugger",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+        "/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-ciphertext-control"
+      ],
+      "simctlPID": 35104,
+      "offset": 16384,
+      "size": 2211840,
+      "originalCryptid": 1,
+      "encryptedBytesSHA256": "2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c"
+    },
+    "ciphertextMemoryRead": {
+      "command": [
+        "xcrun",
+        "lldb",
+        "--batch",
+        "-p",
+        "35114",
+        "-o",
+        "image list",
+        "-o",
+        "script import hashlib; t=lldb.debugger.GetSelectedTarget(); m=t.GetModuleAtIndex(0); base=m.GetObjectFileHeaderAddress().GetLoadAddress(t); e=lldb.SBError(); b=t.GetProcess().ReadMemory(base+16384,2211840,e); print('main_module='+str(m.GetFileSpec())); print('base='+hex(base)); print('memory_bytes='+str(len(b))); print('read_error='+str(e)); print('memory_sha256='+hashlib.sha256(b).hexdigest())",
+        "-o",
+        "process kill"
+      ],
+      "exit": 0,
+      "stdout": "(lldb) process attach --pid 35114\nProcess 35114 stopped\n* thread #1, stop reason = signal SIGSTOP\n       frame #0: 0x0000000100648bf0 dyld`_dyld_start\ndyld`_dyld_start:\n->  0x100648bf0 <+0>:  mov    x0, sp\n    0x100648bf4 <+4>:  and    sp, x0, #0xfffffffffffffff0\n    0x100648bf8 <+8>:  mov    x29, #0x0                 ; =0 \n    0x100648bfc <+12>: mov    x30, #0x0                 ; =0 \nTarget 0: (SCWatchExtension-ciphertext-control) stopped.\nExecutable binary set to \"/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-ciphertext-control\".\nArchitecture set to: arm64-apple-watchos-simulator.\n(lldb) image list\n[  0] C50E7885-A299-39F6-AD30-293C335475D4 0x0000000100294000 /Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-ciphertext-control \n[  1] D341DDCB-7969-3A9C-8E03-0CF4751398A9 0x0000000100644000 /usr/lib/dyld \n(lldb) script import hashlib; t=lldb.debugger.GetSelectedTarget(); m=t.GetModuleAtIndex(0); base=m.GetObjectFileHeaderAddress().GetLoadAddress(t); e=lldb.SBError(); b=t.GetProcess().ReadMemory(base+16384,2211840,e); print('main_module='+str(m.GetFileSpec())); print('base='+hex(base)); print('memory_bytes='+str(len(b))); print('read_error='+str(e)); print('memory_sha256='+hashlib.sha256(b).hexdigest())\nmain_module=/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-ciphertext-control\nbase=0x100294000\nmemory_bytes=2211840\nread_error=success\nmemory_sha256=2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c\n(lldb) process kill\nProcess 35114 exited with status = 9 (0x00000009) killed\n",
+      "stderr": ""
+    },
+    "ciphertextExecution": {
+      "command": [
+        "xcrun",
+        "simctl",
+        "spawn",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5",
+        "/Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-ciphertext-control"
+      ],
+      "exit": 138,
+      "stdout": "",
+      "stderr": "Child process terminated with signal 10: Bus error\n"
+    },
+    "cleanup": {
+      "command": [
+        "xcrun",
+        "simctl",
+        "shutdown",
+        "6981A388-CCF4-42CA-ABE7-041D7244CBA5"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": "",
+      "note": "Dedicated simulator retained with installed app; shut down after tests. Original IPA unchanged."
+    }
+  },
+  "hostValidationEvidence": [
+    "2026-11-07 21:04:10.910 Df amfid[123:5690cf] /Users/petergelgor/Library/Developer/CoreSimulator/Devices/6981A388-CCF4-42CA-ABE7-041D7244CBA5/data/Containers/Bundle/Application/63373F38-6783-45A8-8FA0-BF0DC8F1BC2D/SCWatch.app/SCWatch not valid: Error Domain=AppleMobileFileIntegrityError Code=-413 \"No matching profile found\" UserInfo={NSURL=file:///Users/petergelgor/Library/Developer/CoreSimulator/Devices/6981A388-CCF4-42CA-ABE7-041D7244CBA5/data/Containers/Bundle/Application/63373F38-6783-45A8-8FA0-BF0DC8F1BC2D/SCWatch.app/, NSLocalizedDescription=No matching profile found}",
+    "2026-11-07 21:04:20.780 Df amfid[123:5690cf] /Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatch.app/PlugIns/SCWatchExtension.appex/SCWatchExtension not valid: Error Domain=AppleMobileFileIntegrityError Code=-413 \"No matching profile found\" UserInfo={NSURL=file:///Users/petergelgor/Documents/projects/Lights%20Timer/.research-cache/sleep-cycle-simulator/SCWatch.app/PlugIns/SCWatchExtension.appex/, NSLocalizedDescription=No matching profile found}",
+    "2026-11-07 21:04:22.467 Df amfid[123:5690cf] /Users/petergelgor/Library/Developer/CoreSimulator/Devices/6981A388-CCF4-42CA-ABE7-041D7244CBA5/data/Containers/Bundle/Application/63373F38-6783-45A8-8FA0-BF0DC8F1BC2D/SCWatch.app/SCWatch not valid: Error Domain=AppleMobileFileIntegrityError Code=-413 \"No matching profile found\" UserInfo={NSURL=file:///Users/petergelgor/Library/Developer/CoreSimulator/Devices/6981A388-CCF4-42CA-ABE7-041D7244CBA5/data/Containers/Bundle/Application/63373F38-6783-45A8-8FA0-BF0DC8F1BC2D/SCWatch.app/, NSLocalizedDescription=No matching profile found}",
+    "2026-11-07 21:04:44.462 Df amfid[123:5690cf] /Users/petergelgor/Library/Developer/CoreSimulator/Devices/6981A388-CCF4-42CA-ABE7-041D7244CBA5/data/Containers/Bundle/Application/63373F38-6783-45A8-8FA0-BF0DC8F1BC2D/SCWatch.app/SCWatch not valid: Error Domain=AppleMobileFileIntegrityError Code=-413 \"No matching profile found\" UserInfo={NSURL=file:///Users/petergelgor/Library/Developer/CoreSimulator/Devices/6981A388-CCF4-42CA-ABE7-041D7244CBA5/data/Containers/Bundle/Application/63373F38-6783-45A8-8FA0-BF0DC8F1BC2D/SCWatch.app/, NSLocalizedDescription=No matching profile found}",
+    "2026-11-07 21:04:54.156 Df amfid[123:5690cf] /Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-arm64 not valid: Error Domain=AppleMobileFileIntegrityError Code=-420 \"The signature on the file is invalid\" UserInfo={NSURL=file:///Users/petergelgor/Documents/projects/Lights%20Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-arm64, NSLocalizedDescription=The signature on the file is invalid}",
+    "2026-11-07 21:04:54.334 Df amfid[123:5690cf] /Users/petergelgor/Documents/projects/Lights Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim not valid: Error Domain=AppleMobileFileIntegrityError Code=-423 \"The file is adhoc signed or signed by an unknown certificate chain\" UserInfo={NSURL=file:///Users/petergelgor/Documents/projects/Lights%20Timer/.research-cache/sleep-cycle-simulator/SCWatchExtension-watchsim, NSLocalizedDescription=The file is adhoc signed or signed by an unknown certificate chain}"
+  ],
+  "protectedRegion": {
+    "fileOffset": 16384,
+    "length": 2211840,
+    "cryptidOriginal": 1,
+    "cryptidNegativeControl": 0,
+    "diskSHA256": "2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c",
+    "memorySHA256": "2588db9bd3b9d7e041ebed08937bc87191afc8d00845d667492d000ddc2adf7c"
+  },
+  "conclusion": "Installation succeeds. Original and platform-retagged encrypted extension fail to spawn. A valid watchOS Simulator control allows LLDB memory reads. Clearing the encryption flag on a disposable copy allows a suspended process, but all protected bytes read by LLDB still match ciphertext; normal execution terminates with SIGBUS. No decrypted watch algorithm was recovered."
+}
